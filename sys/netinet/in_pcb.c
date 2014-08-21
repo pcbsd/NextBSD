@@ -44,7 +44,6 @@ __FBSDID("$FreeBSD$");
 #include "opt_inet6.h"
 #include "opt_pcbgroup.h"
 #include "opt_rss.h"
-#include "opt_mpath.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -70,7 +69,6 @@ __FBSDID("$FreeBSD$");
 
 #include <net/if.h>
 #include <net/if_var.h>
-#include <net/if_llatbl.h>
 #include <net/if_types.h>
 #include <net/route.h>
 #include <net/vnet.h>
@@ -132,8 +130,6 @@ VNET_DEFINE(int, ipport_tcpallocs);
 static VNET_DEFINE(int, ipport_tcplastcount);
 
 #define	V_ipport_tcplastcount		VNET(ipport_tcplastcount)
-
-extern u_int inpcb_rt_cache_enable;
 
 static void	in_pcbremlists(struct inpcb *inp);
 #ifdef INET
@@ -491,180 +487,6 @@ inp_so_options(const struct inpcb *inp)
 	   so_options |= SO_REUSEADDR;
    return (so_options);
 }
-
-/*
- * in_rt_valid() both checks for, and attempts to ensure, that a cached route
- * is present on a socket. It will call in_pcbrtalloc() if conditions are
- * right (i.e. routing is enabled on the socket) and required (no route cached
- * already or the cached rout is no longer valid). A route can only be
- * installed if the caller passes the inp with a write lock, but the route may
- * be used if a read lock is held.
- */
-
-int
-in_rt_valid(struct inpcb *inp)
-{
-	struct radix_node_head *rnh;
-
-	INP_WLOCK_ASSERT(inp);
-
-	if (inpcb_rt_cache_enable == 0)
-		return (0);
-	if (inp->inp_socket == NULL)
-		return (0);
-	if (inp->inp_socket->so_options & SO_DONTROUTE)
-		return (0);
-	if (inp->inp_vflag & INP_IPV6PROTO)
-		rnh = rt_tables_get_rnh(0, AF_INET6);
-	else
-		rnh = rt_tables_get_rnh(inp->inp_inc.inc_fibnum, AF_INET);
-	if (inp->inp_rt != NULL &&
-	    (inp->inp_rt->rt_flags & RTF_UP) &&
-	    inp->inp_rt_gen == rnh->rnh_gen)
-		return (1);
-	/*
-	 * This will handle selectively replacing one field or the other or
-	 * merely updating the inpcb's routing generation count.
-	 */
-	in_pcbrtalloc(inp);
-	return (inp->inp_rt != NULL && inp->inp_rt->rt_ifp != NULL);
-}
-
-/*
- * in_pcbrtalloc will install or update a cached route on an inpcb.
- */
-
-void
-in_pcbrtalloc(struct inpcb *inp)
-{
-	struct rtentry *rt;
-	struct radix_node_head *rnh = NULL;
-	int gen;
-	struct route_in6 iproute;
-#ifdef INET6
-	struct route_in6 *sro6 = NULL;
-	struct sockaddr_in6 *sin6 = NULL;
-#endif
-#ifdef INET
-	struct sockaddr_in *sin = NULL;
-	struct route *sro = NULL;
-	struct in_ifaddr *ia;
-#endif
-
-	INP_WLOCK_ASSERT(inp);
-
-	if (inpcb_rt_cache_enable == 0)
-		return;
-
-	if (inp->inp_socket->so_options & SO_DONTROUTE)
-		return;
-
-	if (inp->inp_vflag & INP_IPV6PROTO) {
-#ifdef INET6
-		sro6 = &iproute;
-		bzero(sro6, sizeof(*sro6));
-		rnh = rt_tables_get_rnh(0, AF_INET6);
-		sin6 = (struct sockaddr_in6 *)&sro6->ro_dst;
-		sin6->sin6_family = AF_INET6;
-		sin6->sin6_len = sizeof(struct sockaddr_in6);
-		sin6->sin6_addr = inp->in6p_faddr;
-#endif
-	} else {
-#ifdef INET
-		sro = (struct route *)&iproute;
-		bzero(sro, sizeof(*sro));
-		rnh = rt_tables_get_rnh(inp->inp_inc.inc_fibnum, AF_INET);
-		sin = (struct sockaddr_in *)&sro->ro_dst;
-		sin->sin_family = AF_INET;
-		sin->sin_len = sizeof(struct sockaddr_in);
-		sin->sin_addr.s_addr = inp->inp_faddr.s_addr;
-#endif
-
-	}
-	if (inp->inp_rt != NULL &&
-	    inp->inp_rt_gen == rnh->rnh_gen) {
-		KASSERT(inp->inp_rt->rt_flags & RTF_UP,
-		    ("gen count unchanged but route invalid"));
-		rt = inp->inp_rt;
-		return;
-	}
-resolve:
-
-	gen = rnh->rnh_gen;
-
-	if (inp->inp_vflag & INP_IPV6PROTO) {
-#ifdef INET6
-#ifdef RADIX_MPATH
-		rtalloc_mpath((struct route *)sro6,
-		    ntohl(sin6->sin6_addr.s6_addr32[3]));
-#else
-		sro6->ro_rt = rtalloc1(&((struct route *)sro6)
-		    ->ro_dst, 0, 0UL);
-		if (sro6->ro_rt)
-			RT_UNLOCK(sro6->ro_rt);
-#endif
-		rt = sro6->ro_rt;
-#endif
-	} else {
-#ifdef INET
-#ifdef RADIX_MPATH
-		rtalloc_mpath_fib(sro, ntohl(inp->inp_faddr.s_addr),
-		    inp->inp_inc.inc_fibnum);
-#else
-		rtalloc_ign_fib(sro, 0, inp->inp_inc.inc_fibnum);
-#endif
-		rt = sro->ro_rt;
-#endif
-	}
-
-	if (inp->inp_rt != NULL) {
-		if (rt == inp->inp_rt) {
-			/* The route is unchanged so we drop the added
-			 * reference and update reference count.
-			 */
-			RTFREE(rt);
-			inp->inp_rt_gen = gen;
-
-			/* The route has been validated and the generation
-			 * count updated so we're done here.
-			 */
-			return;
-		}
-#ifdef INET
-		/* Drop our reference to the old route */
-		ia = ifatoia(inp->inp_rt->rt_ifa);
-		ifa_free(&ia->ia_ifa);
-		inp->inp_ifaddr = NULL;
-#endif
-		RTFREE(inp->inp_rt);
-		inp->inp_rt = NULL;
-	}
-
-	if (inp->inp_lle != NULL) {
-		LLE_FREE(inp->inp_lle);
-		inp->inp_lle = NULL;
-	}
-	if (rt == NULL)
-		return;
-
-	if (gen != rnh->rnh_gen) {
-		/*
-		 * The routing tree was updated some time after we read its
-		 * generation counter.
-		 */
-		RTFREE(rt);
-		goto resolve;
-	}
-
-	inp->inp_rt = rt;
-#ifdef INET
-	ia = ifatoia(rt->rt_ifa);
-	ifa_ref(&ia->ia_ifa);
-	inp->inp_ifaddr = ia;
-#endif
-	inp->inp_rt_gen = gen;
-}
-
 #endif /* INET || INET6 */
 
 /*
@@ -904,7 +726,6 @@ in_pcbconnect_mbuf(struct inpcb *inp, struct sockaddr *nam,
 	inp->inp_laddr.s_addr = laddr;
 	inp->inp_faddr.s_addr = faddr;
 	inp->inp_fport = fport;
-
 	in_pcbrehash_mbuf(inp, m);
 
 	if (anonport)
@@ -957,7 +778,7 @@ in_pcbladdr(struct inpcb *inp, struct in_addr *faddr, struct in_addr *laddr,
 	 * Find out route to destination.
 	 */
 	if ((inp->inp_socket->so_options & SO_DONTROUTE) == 0)
-		rtalloc_ign_fib(&sro, 0, inp->inp_inc.inc_fibnum);
+		in_rtalloc_ign(&sro, 0, inp->inp_inc.inc_fibnum);
 
 	/*
 	 * If we found a route, use the address corresponding to
@@ -1277,19 +1098,6 @@ in_pcbdisconnect(struct inpcb *inp)
 	INP_WLOCK_ASSERT(inp);
 	INP_HASH_WLOCK_ASSERT(inp->inp_pcbinfo);
 
-	if (inp->inp_rt != NULL) {
-		RTFREE(inp->inp_rt);
-		inp->inp_rt = NULL;
-	}
-	if (inp->inp_ifaddr != NULL) {
-		ifa_free(&inp->inp_ifaddr->ia_ifa);
-		inp->inp_ifaddr = NULL;
-	}
-	if (inp->inp_lle != NULL) {
-		LLE_FREE(inp->inp_lle);
-		inp->inp_lle = NULL;
-	}
-
 	inp->inp_faddr.s_addr = INADDR_ANY;
 	inp->inp_fport = 0;
 	in_pcbrehash(inp);
@@ -1429,20 +1237,6 @@ in_pcbfree(struct inpcb *inp)
 
 	INP_INFO_WLOCK_ASSERT(pcbinfo);
 	INP_WLOCK_ASSERT(inp);
-
-	if (inp->inp_rt != NULL) {
-		RTFREE(inp->inp_rt);
-		inp->inp_rt = NULL;
-#ifdef INET
-		KASSERT(inp->inp_ifaddr != NULL, ("route valid but ifaddr not set"));
-		ifa_free(&inp->inp_ifaddr->ia_ifa);
-		inp->inp_ifaddr = NULL;
-#endif
-	}
-	if (inp->inp_lle != NULL) {
-		LLE_FREE(inp->inp_lle);
-		inp->inp_lle = NULL;
-	}
 
 	/* XXXRW: Do as much as possible here. */
 #ifdef IPSEC

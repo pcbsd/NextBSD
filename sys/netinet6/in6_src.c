@@ -680,9 +680,7 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 		     ((struct sockaddr *)(&ro->ro_dst))->sa_family != AF_INET6 ||
 		     !IN6_ARE_ADDR_EQUAL(&satosin6(&ro->ro_dst)->sin6_addr,
 		     dst))) {
-
-			if (!(ro->ro_flags & RT_CACHING_CONTEXT))
-				RTFREE(ro->ro_rt);
+			RTFREE(ro->ro_rt);
 			ro->ro_rt = (struct rtentry *)NULL;
 		}
 		if (ro->ro_rt == (struct rtentry *)NULL) {
@@ -716,8 +714,7 @@ selectroute(struct sockaddr_in6 *dstsock, struct ip6_pktopts *opts,
 			ifp = ro->ro_rt->rt_ifp;
 
 			if (ifp == NULL) { /* can this really happen? */
-				if (!(ro->ro_flags & RT_CACHING_CONTEXT))
-					RTFREE(ro->ro_rt);
+				RTFREE(ro->ro_rt);
 				ro->ro_rt = NULL;
 			}
 		}

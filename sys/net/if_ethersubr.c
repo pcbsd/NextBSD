@@ -143,26 +143,6 @@ update_mbuf_csumflags(struct mbuf *src, struct mbuf *dst)
 		dst->m_pkthdr.csum_data = 0xffff;
 }
 
-static __inline void
-update_cached_lle(struct route *ro, struct llentry *lle, struct ifnet *ifp,
-				  const struct sockaddr *dst)
-{
-	if (lle == ro->ro_lle ||
-		(ro->ro_flags & RT_CACHING_CONTEXT) == 0)
-		return;
-
-	IF_AFDATA_RLOCK(ifp);	
-	lle = lla_lookup(LLTABLE(ifp), LLE_EXCLUSIVE, dst);
-	IF_AFDATA_RUNLOCK(ifp);	
-	if (lle != NULL) {
-		LLE_ADDREF(lle);
-		LLE_WUNLOCK(lle);
-		if (ro->ro_lle != NULL)
-			LLE_FREE(ro->ro_lle);
-		ro->ro_lle = lle;
-	}
-}
-
 /*
  * Ethernet output routine.
  * Encapsulate a packet of type family for the local net.
@@ -212,8 +192,6 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 		if (error)
 			return (error == EWOULDBLOCK ? 0 : error);
 		type = htons(ETHERTYPE_IP);
-		if (ro != NULL)
-			update_cached_lle(ro, lle, ifp, dst);
 		break;
 	case AF_ARP:
 	{
@@ -252,8 +230,6 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 		if (error)
 			return error;
 		type = htons(ETHERTYPE_IPV6);
-		if (ro != NULL)
-			update_cached_lle(ro, lle, ifp, dst);
 		break;
 #endif
 	case pseudo_AF_HDRCMPLT:

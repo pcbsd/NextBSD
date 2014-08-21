@@ -408,7 +408,7 @@ int nd6_ioctl(u_long, caddr_t, struct ifnet *);
 struct llentry *nd6_cache_lladdr(struct ifnet *, struct in6_addr *,
 	char *, int, int, int);
 int nd6_output(struct ifnet *, struct ifnet *, struct mbuf *,
-	struct sockaddr_in6 *, struct route_in6 *);
+	struct sockaddr_in6 *, struct rtentry *);
 int nd6_output_lle(struct ifnet *, struct ifnet *, struct mbuf *,
 	struct sockaddr_in6 *, struct rtentry *, struct llentry *,
 	struct mbuf **);
