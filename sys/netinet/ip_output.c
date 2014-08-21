@@ -130,7 +130,7 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 	struct sockaddr_in *dst;
 	const struct sockaddr_in *gw;
 	struct in_ifaddr *ia;
-	int isbroadcast;
+	int isbroadcast, nortfree;
 	uint16_t ip_len, ip_off;
 	struct route iproute;
 	struct rtentry *rte;	/* cache for ro->ro_rt */
@@ -160,6 +160,10 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 #ifdef FLOWTABLE
 	if (ro->ro_rt == NULL)
 		(void )flowtable_lookup(AF_INET, m, ro);
+	else {
+		nortfree = 1;
+		ia = ro->ro_ia;
+	}
 #endif
 
 	if (opt) {
@@ -284,6 +288,7 @@ again:
 			    inp ? inp->inp_inc.inc_fibnum : M_GETFIB(m));
 #endif
 			rte = ro->ro_rt;
+			nortfree = 0;
 		}
 		if (rte == NULL ||
 		    rte->rt_ifp == NULL ||
@@ -703,7 +708,7 @@ passout:
 		IPSTAT_INC(ips_fragmented);
 
 done:
-	if (ro == &iproute)
+	if (ro == &iproute && !nortfree)
 		RO_RTFREE(ro);
 	if (have_ia_ref)
 		ifa_free(&ia->ia_ifa);

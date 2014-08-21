@@ -595,7 +595,7 @@ again2:
 	}
 
 pass:
-	error = nd6_output(rt->rt_ifp, origifp, m, dst, rt);
+	error = nd6_output(rt->rt_ifp, origifp, m, dst, &rin6);
 	if (error) {
 		in6_ifstat_inc(rt->rt_ifp, ifs6_out_discard);
 		IP6STAT_INC(ip6s_cantforward);

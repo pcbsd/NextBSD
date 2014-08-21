@@ -1840,7 +1840,7 @@ nd6_slowtimo(void *arg)
  */
 int
 nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m,
-    struct sockaddr_in6 *dst, struct rtentry *rt0)
+    struct sockaddr_in6 *dst, struct route_in6 *ro)
 {
 	struct llentry *ln = NULL;
 	int error = 0;
@@ -1874,7 +1874,7 @@ nd6_output(struct ifnet *ifp, struct ifnet *origifp, struct mbuf *m,
 		/* Fall back to slow processing path */
 		if (ln != NULL)
 			LLE_RUNLOCK(ln);
-		return (nd6_output_lle(ifp, origifp, m, dst, rt0, NULL, NULL));
+		return (nd6_output_lle(ifp, origifp, m, dst, ro->ro_rt, ro->ro_lle, NULL));
 	}
 
 sendpkt:
@@ -1915,8 +1915,8 @@ sendpkt:
 
 	if ((ifp->if_flags & IFF_LOOPBACK) == 0)
 		origifp = ifp;
-	
-	error = (*ifp->if_output)(origifp, m, (struct sockaddr *)dst, NULL);
+
+	error = (*ifp->if_output)(origifp, m, (struct sockaddr *)dst, (struct route *)ro);
 	return (error);
 }
 
