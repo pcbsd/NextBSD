@@ -137,11 +137,15 @@ struct i40e_spinlock {
 
 #define le16_to_cpu 
 
+#if defined(__amd64__) || defined(i386)
 static __inline
 void prefetch(void *x)
 {
 	__asm volatile("prefetcht0 %0" :: "m" (*(unsigned long *)x));
 }
+#else
+#define	prefetch(x)
+#endif
 
 struct i40e_osdep
 {
@@ -166,9 +170,6 @@ struct i40e_hw; /* forward decl */
 u16	i40e_read_pci_cfg(struct i40e_hw *, u32);
 void	i40e_write_pci_cfg(struct i40e_hw *, u32, u16);
 
-#define i40e_allocate_dma_mem(h, m, unused, s, a) i40e_allocate_dma(h, m, s, a)
-#define i40e_free_dma_mem(h, m) i40e_free_dma(h, m)
-
 #define i40e_debug(h, m, s, ...)  i40e_debug_d(h, m, s, ##__VA_ARGS__)
 extern void i40e_debug_d(void *hw, u32 mask, char *fmt_str, ...);
 
@@ -176,8 +177,6 @@ struct i40e_virt_mem {
 	void *va;
 	u32 size;
 };
-#define i40e_allocate_virt_mem(h, m, s) i40e_allocate_virt(h, m, s)
-#define i40e_free_virt_mem(h, m) i40e_free_virt(h, m)
 
 /*
 ** This hardware supports either 16 or 32 byte rx descriptors
@@ -191,7 +190,7 @@ rd32_osdep(struct i40e_osdep *osdep, uint32_t reg)
 
 	KASSERT(reg < osdep->mem_bus_space_size,
 	    ("ixl: register offset %#jx too large (max is %#jx",
-	    (uintmax_t)a, (uintmax_t)osdep->mem_bus_space_size));
+	    (uintmax_t)reg, (uintmax_t)osdep->mem_bus_space_size));
 
 	return (bus_space_read_4(osdep->mem_bus_space_tag,
 	    osdep->mem_bus_space_handle, reg));
@@ -203,7 +202,7 @@ wr32_osdep(struct i40e_osdep *osdep, uint32_t reg, uint32_t value)
 
 	KASSERT(reg < osdep->mem_bus_space_size,
 	    ("ixl: register offset %#jx too large (max is %#jx",
-	    (uintmax_t)a, (uintmax_t)osdep->mem_bus_space_size));
+	    (uintmax_t)reg, (uintmax_t)osdep->mem_bus_space_size));
 
 	bus_space_write_4(osdep->mem_bus_space_tag,
 	    osdep->mem_bus_space_handle, reg, value);

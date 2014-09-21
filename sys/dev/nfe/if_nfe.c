@@ -591,7 +591,7 @@ nfe_attach(device_t dev)
 	nfe_sysctl_node(sc);
 
 	if_setsoftc(ifp, sc);
-	if_initname_drv(ifp, device_get_name(dev), device_get_unit(dev));
+	if_initname(ifp, device_get_name(dev), device_get_unit(dev));
 	if_setflags(ifp, IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST);
 	if_setioctlfn(ifp, nfe_ioctl);
 	if_setstartfn(ifp, nfe_start);
@@ -624,8 +624,8 @@ nfe_attach(device_t dev)
 
 	/*
 	 * Tell the upper layer(s) we support long frames.
-	 * Must appear after the call to ether_ifattach_drv() because
-	 * ether_ifattach_drv() sets ifi_hdrlen to the default value.
+	 * Must appear after the call to ether_ifattach() because
+	 * ether_ifattach() sets ifi_hdrlen to the default value.
 	 */
 	if_setifheaderlen(ifp, sizeof(struct ether_vlan_header));
 
@@ -649,7 +649,7 @@ nfe_attach(device_t dev)
 		device_printf(dev, "attaching PHYs failed\n");
 		goto fail;
 	}
-	ether_ifattach_drv(ifp, sc->eaddr);
+	ether_ifattach(ifp, sc->eaddr);
 
 	TASK_INIT(&sc->nfe_int_task, 0, nfe_int_task, sc);
 	sc->nfe_tq = taskqueue_create_fast("nfe_taskq", M_WAITOK,
@@ -674,7 +674,7 @@ nfe_attach(device_t dev)
 		device_printf(dev, "couldn't set up irq\n");
 		taskqueue_free(sc->nfe_tq);
 		sc->nfe_tq = NULL;
-		ether_ifdetach_drv(ifp);
+		ether_ifdetach(ifp);
 		goto fail;
 	}
 
@@ -708,7 +708,7 @@ nfe_detach(device_t dev)
 		if_setflagbits(ifp, 0, IFF_UP);
 		NFE_UNLOCK(sc);
 		callout_drain(&sc->nfe_stat_ch);
-		ether_ifdetach_drv(ifp);
+		ether_ifdetach(ifp);
 	}
 
 	if (ifp) {
@@ -720,7 +720,7 @@ nfe_detach(device_t dev)
 		} else
 			bcopy(sc->eaddr, eaddr, ETHER_ADDR_LEN);
 		nfe_set_macaddr(sc, eaddr);
-		if_free_drv(ifp);
+		if_free(ifp);
 	}
 	if (sc->nfe_miibus)
 		device_delete_child(dev, sc->nfe_miibus);
@@ -1775,7 +1775,7 @@ nfe_ioctl(if_t ifp, u_long cmd, caddr_t data)
 	case SIOCSIFMEDIA:
 	case SIOCGIFMEDIA:
 		mii = device_get_softc(sc->nfe_miibus);
-		error = ifmedia_ioctl_drv(ifp, ifr, &mii->mii_media, cmd);
+		error = ifmedia_ioctl(ifp, ifr, &mii->mii_media, cmd);
 		break;
 	case SIOCSIFCAP:
 		mask = ifr->ifr_reqcap ^ if_getcapenable(ifp);
@@ -1853,7 +1853,7 @@ nfe_ioctl(if_t ifp, u_long cmd, caddr_t data)
 		if_vlancap(ifp);
 		break;
 	default:
-		error = ether_ioctl_drv(ifp, cmd, data);
+		error = ether_ioctl(ifp, cmd, data);
 		break;
 	}
 
@@ -2149,7 +2149,7 @@ nfe_rxeof(struct nfe_softc *sc, int count, int *rx_npktsp)
 		prog++;
 		if ((sc->nfe_flags & (NFE_JUMBO_SUP | NFE_40BIT_ADDR)) == 0) {
 			if (!(flags & NFE_RX_VALID_V1)) {
-				if_incierrors(ifp, 1);
+				if_inc_counter(ifp, IFCOUNTER_IERRORS, 1);
 				nfe_discard_rxbuf(sc, sc->rxq.cur);
 				continue;
 			}
@@ -2159,7 +2159,7 @@ nfe_rxeof(struct nfe_softc *sc, int count, int *rx_npktsp)
 			}
 		} else {
 			if (!(flags & NFE_RX_VALID_V2)) {
-				if_incierrors(ifp, 1);
+				if_inc_counter(ifp, IFCOUNTER_IERRORS, 1);
 				nfe_discard_rxbuf(sc, sc->rxq.cur);
 				continue;
 			}
@@ -2171,14 +2171,14 @@ nfe_rxeof(struct nfe_softc *sc, int count, int *rx_npktsp)
 		}
 
 		if (flags & NFE_RX_ERROR) {
-			if_incierrors(ifp, 1);
+			if_inc_counter(ifp, IFCOUNTER_IERRORS, 1);
 			nfe_discard_rxbuf(sc, sc->rxq.cur);
 			continue;
 		}
 
 		m = data->m;
 		if (nfe_newbuf(sc, sc->rxq.cur) != 0) {
-			if_inciqdrops(ifp, 1);
+			if_inc_counter(ifp, IFCOUNTER_IQDROPS, 1);
 			nfe_discard_rxbuf(sc, sc->rxq.cur);
 			continue;
 		}
@@ -2205,7 +2205,7 @@ nfe_rxeof(struct nfe_softc *sc, int count, int *rx_npktsp)
 			}
 		}
 
-		if_incipackets(ifp, 1);
+		if_inc_counter(ifp, IFCOUNTER_IPACKETS, 1);
 
 		NFE_UNLOCK(sc);
 		if_input(ifp, m);
@@ -2265,7 +2265,7 @@ nfe_jrxeof(struct nfe_softc *sc, int count, int *rx_npktsp)
 		prog++;
 		if ((sc->nfe_flags & (NFE_JUMBO_SUP | NFE_40BIT_ADDR)) == 0) {
 			if (!(flags & NFE_RX_VALID_V1)) {
-				if_incierrors(ifp, 1);
+				if_inc_counter(ifp, IFCOUNTER_IERRORS, 1);
 				nfe_discard_jrxbuf(sc, sc->jrxq.jcur);
 				continue;
 			}
@@ -2275,7 +2275,7 @@ nfe_jrxeof(struct nfe_softc *sc, int count, int *rx_npktsp)
 			}
 		} else {
 			if (!(flags & NFE_RX_VALID_V2)) {
-				if_incierrors(ifp, 1);
+				if_inc_counter(ifp, IFCOUNTER_IERRORS, 1);
 				nfe_discard_jrxbuf(sc, sc->jrxq.jcur);
 				continue;
 			}
@@ -2287,14 +2287,14 @@ nfe_jrxeof(struct nfe_softc *sc, int count, int *rx_npktsp)
 		}
 
 		if (flags & NFE_RX_ERROR) {
-			if_incierrors(ifp, 1);
+			if_inc_counter(ifp, IFCOUNTER_IERRORS, 1);
 			nfe_discard_jrxbuf(sc, sc->jrxq.jcur);
 			continue;
 		}
 
 		m = data->m;
 		if (nfe_jnewbuf(sc, sc->jrxq.jcur) != 0) {
-			if_inciqdrops(ifp, 1);
+			if_inc_counter(ifp, IFCOUNTER_IQDROPS, 1);
 			nfe_discard_jrxbuf(sc, sc->jrxq.jcur);
 			continue;
 		}
@@ -2321,7 +2321,7 @@ nfe_jrxeof(struct nfe_softc *sc, int count, int *rx_npktsp)
 			}
 		}
 
-		if_incipackets(ifp, 1);
+		if_inc_counter(ifp, IFCOUNTER_IPACKETS, 1);
 
 		NFE_UNLOCK(sc);
 		if_input(ifp, m);
@@ -2379,18 +2379,18 @@ nfe_txeof(struct nfe_softc *sc)
 				device_printf(sc->nfe_dev,
 				    "tx v1 error 0x%4b\n", flags, NFE_V1_TXERR);
 
-				if_incoerrors(ifp, 1);
+				if_inc_counter(ifp, IFCOUNTER_OERRORS, 1);
 			} else
-				if_incopackets(ifp, 1);
+				if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
 		} else {
 			if ((flags & NFE_TX_LASTFRAG_V2) == 0)
 				continue;
 			if ((flags & NFE_TX_ERROR_V2) != 0) {
 				device_printf(sc->nfe_dev,
 				    "tx v2 error 0x%4b\n", flags, NFE_V2_TXERR);
-				if_incoerrors(ifp, 1);
+				if_inc_counter(ifp, IFCOUNTER_OERRORS, 1);
 			} else
-				if_incopackets(ifp, 1);
+				if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
 		}
 
 		/* last fragment of the mbuf chain transmitted */
@@ -2723,7 +2723,7 @@ nfe_watchdog(if_t ifp)
 	if_printf(ifp, "watchdog timeout\n");
 
 	if_setdrvflagbits(ifp, 0, IFF_DRV_RUNNING);
-	if_incoerrors(ifp, 1);
+	if_inc_counter(ifp, IFCOUNTER_OERRORS, 1);
 	nfe_init_locked(sc);
 }
 

@@ -2571,7 +2571,7 @@ pmap_growkernel(vm_offset_t addr)
 	 * "kernel_vm_end" and the kernel page table as they were.
 	 *
 	 * The correctness of this action is based on the following
-	 * argument: vm_map_findspace() allocates contiguous ranges of the
+	 * argument: vm_map_insert() allocates contiguous ranges of the
 	 * kernel virtual address space.  It calls this function if a range
 	 * ends after "kernel_vm_end".  If the kernel is mapped between
 	 * "kernel_vm_end" and "addr", then the range cannot begin at
@@ -3845,7 +3845,8 @@ pmap_protect(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, vm_prot_t prot)
 	pt_entry_t *pte, PG_G, PG_M, PG_RW, PG_V;
 	boolean_t anychanged, pv_lists_locked;
 
-	if ((prot & VM_PROT_READ) == VM_PROT_NONE) {
+	KASSERT((prot & ~VM_PROT_ALL) == 0, ("invalid prot %x", prot));
+	if (prot == VM_PROT_NONE) {
 		pmap_remove(pmap, sva, eva);
 		return;
 	}
