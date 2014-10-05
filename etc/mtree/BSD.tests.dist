@@ -89,6 +89,8 @@
             ..
             libnv
             ..
+            libproc
+            ..
             libutil
             ..
         ..
@@ -284,6 +286,8 @@
             etcupdate
             ..
             newsyslog
+            ..
+            pw
             ..
             sa
             ..
