@@ -146,14 +146,16 @@ SUBDIR=	\
 	if_edsc \
 	if_epair \
 	if_faith \
-	if_gif \
+	${_if_gif} \
 	${_if_gre} \
+	${_if_me} \
 	if_lagg \
 	${_if_ndis} \
 	if_stf \
 	if_tap \
 	if_tun \
 	if_vlan \
+	if_vxlan \
 	${_igb} \
 	${_iir} \
 	imgact_binmisc \
@@ -269,6 +271,7 @@ SUBDIR=	\
 	${_opensolaris} \
 	oce \
 	${_padlock} \
+	${_padlock_rng} \
 	patm \
 	${_pccard} \
 	${_pcfclock} \
@@ -296,6 +299,7 @@ SUBDIR=	\
 	${_random} \
 	rc4 \
 	${_rdma} \
+	${_rdrand_rng} \
 	re \
 	reiserfs \
 	rl \
@@ -400,10 +404,12 @@ _random=	random
 	defined(ALL_MODULES)
 _carp=		carp
 _toecore=	toecore
+_if_gif=	if_gif
+_if_gre=	if_gre
 .endif
 
 .if ${MK_INET_SUPPORT} != "no" || defined(ALL_MODULES)
-_if_gre=	if_gre
+_if_me=		if_me
 _ipdivert=	ipdivert
 _ipfw=		ipfw
 .endif
@@ -582,6 +588,8 @@ _nvram=		nvram
 _nxge=		nxge
 .if ${MK_CRYPT} != "no" || defined(ALL_MODULES)
 _padlock=	padlock
+_padlock_rng=	padlock_rng
+_rdrand_rng=	rdrand_rng
 .endif
 _s3=		s3
 _tpm=		tpm

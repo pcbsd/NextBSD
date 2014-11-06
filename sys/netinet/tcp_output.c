@@ -90,36 +90,36 @@ __FBSDID("$FreeBSD$");
 #include <security/mac/mac_framework.h>
 
 VNET_DEFINE(int, path_mtu_discovery) = 1;
-SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, path_mtu_discovery, CTLFLAG_RW,
+SYSCTL_INT(_net_inet_tcp, OID_AUTO, path_mtu_discovery, CTLFLAG_VNET | CTLFLAG_RW,
 	&VNET_NAME(path_mtu_discovery), 1,
 	"Enable Path MTU Discovery");
 
 VNET_DEFINE(int, tcp_do_tso) = 1;
 #define	V_tcp_do_tso		VNET(tcp_do_tso)
-SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, tso, CTLFLAG_RW,
+SYSCTL_INT(_net_inet_tcp, OID_AUTO, tso, CTLFLAG_VNET | CTLFLAG_RW,
 	&VNET_NAME(tcp_do_tso), 0,
 	"Enable TCP Segmentation Offload");
 
 VNET_DEFINE(int, tcp_sendspace) = 1024*32;
 #define	V_tcp_sendspace	VNET(tcp_sendspace)
-SYSCTL_VNET_INT(_net_inet_tcp, TCPCTL_SENDSPACE, sendspace, CTLFLAG_RW,
+SYSCTL_INT(_net_inet_tcp, TCPCTL_SENDSPACE, sendspace, CTLFLAG_VNET | CTLFLAG_RW,
 	&VNET_NAME(tcp_sendspace), 0, "Initial send socket buffer size");
 
 VNET_DEFINE(int, tcp_do_autosndbuf) = 1;
 #define	V_tcp_do_autosndbuf	VNET(tcp_do_autosndbuf)
-SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, sendbuf_auto, CTLFLAG_RW,
+SYSCTL_INT(_net_inet_tcp, OID_AUTO, sendbuf_auto, CTLFLAG_VNET | CTLFLAG_RW,
 	&VNET_NAME(tcp_do_autosndbuf), 0,
 	"Enable automatic send buffer sizing");
 
 VNET_DEFINE(int, tcp_autosndbuf_inc) = 8*1024;
 #define	V_tcp_autosndbuf_inc	VNET(tcp_autosndbuf_inc)
-SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, sendbuf_inc, CTLFLAG_RW,
+SYSCTL_INT(_net_inet_tcp, OID_AUTO, sendbuf_inc, CTLFLAG_VNET | CTLFLAG_RW,
 	&VNET_NAME(tcp_autosndbuf_inc), 0,
 	"Incrementor step size of automatic send buffer");
 
 VNET_DEFINE(int, tcp_autosndbuf_max) = 2*1024*1024;
 #define	V_tcp_autosndbuf_max	VNET(tcp_autosndbuf_max)
-SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, sendbuf_max, CTLFLAG_RW,
+SYSCTL_INT(_net_inet_tcp, OID_AUTO, sendbuf_max, CTLFLAG_VNET | CTLFLAG_RW,
 	&VNET_NAME(tcp_autosndbuf_max), 0,
 	"Max size of automatic send buffer");
 
@@ -675,6 +675,12 @@ just_return:
 
 send:
 	SOCKBUF_LOCK_ASSERT(&so->so_snd);
+	if (len > 0) {
+		if (len >= tp->t_maxseg)
+			tp->t_flags2 |= TF2_PLPMTU_MAXSEGSNT;
+		else
+			tp->t_flags2 &= ~TF2_PLPMTU_MAXSEGSNT;
+	}
 	/*
 	 * Before ESTABLISHED, force sending of initial options
 	 * unless TCP set not to do any options.
@@ -806,41 +812,40 @@ send:
 			 * Check if we should limit by maximum segment
 			 * size and count:
 			 */
-			if (if_hw_tsomaxsegcount != 0 && if_hw_tsomaxsegsize != 0) {
+			if (if_hw_tsomaxsegcount != 0 &&
+			    if_hw_tsomaxsegsize != 0) {
 				max_len = 0;
 				mb = sbsndmbuf(&so->so_snd, off, &moff);
 
 				while (mb != NULL && (u_int)max_len < len) {
-					u_int cur_length;
-					u_int cur_frags;
+					u_int mlen;
+					u_int frags;
 
 					/*
 					 * Get length of mbuf fragment
-					 * and how many hardware
-					 * frags, rounded up, it would
-					 * use:
+					 * and how many hardware frags,
+					 * rounded up, it would use:
 					 */
-					cur_length = (mb->m_len - moff);
-					cur_frags = (cur_length + if_hw_tsomaxsegsize -
-					    1) / if_hw_tsomaxsegsize;
+					mlen = (mb->m_len - moff);
+					frags = howmany(mlen,
+					    if_hw_tsomaxsegsize);
 
 					/* Handle special case: Zero Length Mbuf */
-					if (cur_frags == 0)
-						cur_frags = 1;
+					if (frags == 0)
+						frags = 1;
 
 					/*
 					 * Check if the fragment limit
-					 * will be reached or
-					 * exceeded:
+					 * will be reached or exceeded:
 					 */
-					if (cur_frags >= if_hw_tsomaxsegcount) {
-						max_len += min(cur_length,
+					if (frags >= if_hw_tsomaxsegcount) {
+						max_len += min(mlen,
 						    if_hw_tsomaxsegcount *
 						    if_hw_tsomaxsegsize);
 						break;
 					}
-					max_len += cur_length;
-					if_hw_tsomaxsegcount -= cur_frags;
+					max_len += mlen;
+					if_hw_tsomaxsegcount -= frags;
 					moff = 0;
 					mb = mb->m_next;
 				}
@@ -1268,6 +1273,11 @@ send:
 		 */
 		ip6->ip6_plen = htons(m->m_pkthdr.len - sizeof(*ip6));
 
+		if (V_path_mtu_discovery && tp->t_maxopd > V_tcp_minmss)
+			tp->t_flags2 |= TF2_PLPMTU_PMTUD;
+		else
+			tp->t_flags2 &= ~TF2_PLPMTU_PMTUD;
+
 		if (tp->t_state == TCPS_SYN_SENT)
 			TCP_PROBE5(connect__request, NULL, tp, ip6, tp, th);
 
@@ -1304,8 +1314,12 @@ send:
 	 *
 	 * NB: Don't set DF on small MTU/MSS to have a safe fallback.
 	 */
-	if (V_path_mtu_discovery && tp->t_maxopd > V_tcp_minmss)
+	if (V_path_mtu_discovery && tp->t_maxopd > V_tcp_minmss) {
 		ip->ip_off |= htons(IP_DF);
+		tp->t_flags2 |= TF2_PLPMTU_PMTUD;
+	} else {
+		tp->t_flags2 &= ~TF2_PLPMTU_PMTUD;
+	}
 
 	if (tp->t_state == TCPS_SYN_SENT)
 		TCP_PROBE5(connect__request, NULL, tp, ip, tp, th);
