@@ -49,6 +49,7 @@ __FBSDID("$FreeBSD$");
 #include "opt_hwpmc_hooks.h"
 #include "opt_isa.h"
 #include "opt_kdb.h"
+#include "opt_compat_mach.h"
 
 #include <sys/param.h>
 #include <sys/bus.h>
@@ -85,6 +86,10 @@ PMC_SOFT_DEFINE( , , page_fault, write);
 
 #include <machine/cpu.h>
 #include <machine/intr_machdep.h>
+#ifdef COMPAT_MACH
+#include <machine/mach_machdep.h>
+extern struct sysent mach_sysent[];
+#endif
 #include <x86/mca.h>
 #include <machine/md_var.h>
 #include <machine/pcb.h>
@@ -917,7 +922,11 @@ cpu_fetch_syscall_args(struct thread *td, struct syscall_args *sa)
 	}
  	if (p->p_sysent->sv_mask)
  		sa->code &= p->p_sysent->sv_mask;
-
+#ifdef COMPAT_MACH
+	if (MACH_SYSCALL(sa->code))
+		sa->callp = &mach_sysent[MACH_SYSCALL_MASK(sa->code)];
+	else
+#endif
  	if (sa->code >= p->p_sysent->sv_size)
  		sa->callp = &p->p_sysent->sv_table[0];
   	else
