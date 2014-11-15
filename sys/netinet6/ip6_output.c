@@ -1196,7 +1196,7 @@ ip6_insertfraghdr(struct mbuf *m0, struct mbuf *m, int hlen,
 	for (mlast = n; mlast->m_next; mlast = mlast->m_next)
 		;
 
-	if ((mlast->m_flags & M_EXT) == 0 &&
+	if (M_WRITABLE(mlast) &&
 	    M_TRAILINGSPACE(mlast) >= sizeof(struct ip6_frag)) {
 		/* use the trailing space of the last mbuf for the fragment hdr */
 		*frghdrp = (struct ip6_frag *)(mtod(mlast, caddr_t) +
@@ -1408,7 +1408,6 @@ ip6_ctloutput(struct socket *so, struct sockopt *sopt)
 				/* FALLTHROUGH */
 			case IPV6_UNICAST_HOPS:
 			case IPV6_HOPLIMIT:
-			case IPV6_FAITH:
 
 			case IPV6_RECVPKTINFO:
 			case IPV6_RECVHOPLIMIT:
@@ -1550,10 +1549,6 @@ do { \
 						break;
 					}
 					OPTSET(IN6P_RTHDR);
-					break;
-
-				case IPV6_FAITH:
-					OPTSET(INP_FAITH);
 					break;
 
 				case IPV6_RECVPATHMTU:
@@ -1823,7 +1818,6 @@ do { \
 			case IPV6_RECVRTHDR:
 			case IPV6_RECVPATHMTU:
 
-			case IPV6_FAITH:
 			case IPV6_V6ONLY:
 			case IPV6_PORTRANGE:
 			case IPV6_RECVTCLASS:
@@ -1866,10 +1860,6 @@ do { \
 
 				case IPV6_RECVPATHMTU:
 					optval = OPTBIT(IN6P_MTU);
-					break;
-
-				case IPV6_FAITH:
-					optval = OPTBIT(INP_FAITH);
 					break;
 
 				case IPV6_V6ONLY:
@@ -2918,7 +2908,7 @@ ip6_mloopback(struct ifnet *ifp, struct mbuf *m, struct sockaddr_in6 *dst)
 	 * is in an mbuf cluster, so that we can safely override the IPv6
 	 * header portion later.
 	 */
-	if ((copym->m_flags & M_EXT) != 0 ||
+	if (!M_WRITABLE(copym) ||
 	    copym->m_len < sizeof(struct ip6_hdr)) {
 		copym = m_pullup(copym, sizeof(struct ip6_hdr));
 		if (copym == NULL)

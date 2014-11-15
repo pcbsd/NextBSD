@@ -991,7 +991,6 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 		case IP_RECVDSTADDR:
 		case IP_RECVTTL:
 		case IP_RECVIF:
-		case IP_FAITH:
 		case IP_ONESBCAST:
 		case IP_DONTFRAG:
 		case IP_RECVTOS:
@@ -1056,10 +1055,6 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 
 			case IP_RECVIF:
 				OPTSET(INP_RECVIF);
-				break;
-
-			case IP_FAITH:
-				OPTSET(INP_FAITH);
 				break;
 
 			case IP_ONESBCAST:
@@ -1200,7 +1195,6 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 		case IP_RECVTTL:
 		case IP_RECVIF:
 		case IP_PORTRANGE:
-		case IP_FAITH:
 		case IP_ONESBCAST:
 		case IP_DONTFRAG:
 		case IP_BINDANY:
@@ -1257,10 +1251,6 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 					optval = IP_PORTRANGE_LOW;
 				else
 					optval = 0;
-				break;
-
-			case IP_FAITH:
-				optval = OPTBIT(INP_FAITH);
 				break;
 
 			case IP_ONESBCAST:
@@ -1365,7 +1355,7 @@ ip_mloopback(struct ifnet *ifp, struct mbuf *m, struct sockaddr_in *dst,
 	 * modify the pack in order to generate checksums.
 	 */
 	copym = m_dup(m, M_NOWAIT);
-	if (copym != NULL && (copym->m_flags & M_EXT || copym->m_len < hlen))
+	if (copym != NULL && (!M_WRITABLE(copym) || copym->m_len < hlen))
 		copym = m_pullup(copym, hlen);
 	if (copym != NULL) {
 		/* If needed, compute the checksum and mark it as valid. */
