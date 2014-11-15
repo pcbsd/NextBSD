@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2012 Ian Lepore
+ * Copyright (c) 2012-2014 Ian Lepore
  * Copyright (c) 2010 Mark Tinguely
  * Copyright (c) 2004 Olivier Houchard
  * Copyright (c) 2002 Peter Grehan
@@ -63,8 +63,6 @@ __FBSDID("$FreeBSD$");
 #include <machine/bus.h>
 #include <machine/cpufunc.h>
 #include <machine/md_var.h>
-
-#define	IS_POWER_OF_2(val)	(((val) & ((val) - 1)) == 0)
 
 #define MAX_BPAGES 64
 #define MAX_DMA_SEGMENTS	4096
@@ -348,6 +346,7 @@ static __inline int
 might_bounce(bus_dma_tag_t dmat, bus_dmamap_t map, bus_addr_t addr, 
     bus_size_t size)
 {
+
 	return ((dmat->flags & BUS_DMA_EXCL_BOUNCE) ||
 	    alignment_bounce(dmat, addr) ||
 	    cacheline_bounce(map, addr, size));
@@ -446,6 +445,7 @@ busdma_lock_mutex(void *arg, bus_dma_lock_op_t op)
 static void
 dflt_lock(void *arg, bus_dma_lock_op_t op)
 {
+
 	panic("driver error: busdma dflt_lock called");
 }
 
@@ -469,11 +469,11 @@ bus_dma_tag_create(bus_dma_tag_t parent, bus_size_t alignment,
 #endif
 
 	/* Basic sanity checking. */
-	KASSERT(boundary == 0 || IS_POWER_OF_2(boundary),
+	KASSERT(boundary == 0 || powerof2(boundary),
 	    ("dma tag boundary %lu, must be a power of 2", boundary));
 	KASSERT(boundary == 0 || boundary >= maxsegsz,
 	    ("dma tag boundary %lu is < maxsegsz %lu\n", boundary, maxsegsz));
-	KASSERT(alignment != 0 && IS_POWER_OF_2(alignment),
+	KASSERT(alignment != 0 && powerof2(alignment),
 	    ("dma tag alignment %lu, must be non-zero power of 2", alignment));
 	KASSERT(maxsegsz != 0, ("dma tag maxsegsz must not be zero"));
 
@@ -627,7 +627,7 @@ out:
 
 static int allocate_bz_and_pages(bus_dma_tag_t dmat, bus_dmamap_t mapp)
 {
-        struct bounce_zone *bz;
+	struct bounce_zone *bz;
 	int maxpages;
 	int error;
 		
@@ -1254,13 +1254,13 @@ _bus_dmamap_unload(bus_dma_tag_t dmat, bus_dmamap_t map)
 }
 
 #ifdef notyetbounceuser
-	/* If busdma uses user pages, then the interrupt handler could
-	 * be use the kernel vm mapping. Both bounce pages and sync list
-	 * do not cross page boundaries.
-	 * Below is a rough sequence that a person would do to fix the
-	 * user page reference in the kernel vmspace. This would be
-	 * done in the dma post routine.
-	 */
+/* If busdma uses user pages, then the interrupt handler could
+ * be use the kernel vm mapping. Both bounce pages and sync list
+ * do not cross page boundaries.
+ * Below is a rough sequence that a person would do to fix the
+ * user page reference in the kernel vmspace. This would be
+ * done in the dma post routine.
+ */
 void
 _bus_dmamap_fix_user(vm_offset_t buf, bus_size_t len,
 			pmap_t pmap, int op)
@@ -1269,10 +1269,10 @@ _bus_dmamap_fix_user(vm_offset_t buf, bus_size_t len,
 	bus_addr_t curaddr;
 	vm_offset_t va;
 
-		/* each synclist entry is contained within a single page.
-		 *
-		 * this would be needed if BUS_DMASYNC_POSTxxxx was implemented
-		*/
+	/* 
+	 * each synclist entry is contained within a single page.
+	 * this would be needed if BUS_DMASYNC_POSTxxxx was implemented
+	 */
 	curaddr = pmap_extract(pmap, buf);
 	va = pmap_dma_map(curaddr);
 	switch (op) {
@@ -1387,8 +1387,18 @@ _bus_dmamap_sync(bus_dma_tag_t dmat, bus_dmamap_t map, bus_dmasync_op_t op)
 			dmat->bounce_zone->total_bounced++;
 		}
 	}
-	if (map->flags & DMAMAP_COHERENT)
+
+	/*
+	 * For COHERENT memory no cache maintenance is necessary, but ensure all
+	 * writes have reached memory for the PREWRITE case.
+	 */
+	if (map->flags & DMAMAP_COHERENT) {
+		if (op & BUS_DMASYNC_PREWRITE) {
+		    dsb();
+		    cpu_l2cache_drain_writebuf();
+		}
 		return;
+	}
 
 	if (map->sync_count != 0) {
 		if (!pmap_dmap_iscurrent(map->pmap))
@@ -1403,10 +1413,10 @@ _bus_dmamap_sync(bus_dma_tag_t dmat, bus_dmamap_t map, bus_dmasync_op_t op)
 		switch (op) {
 		case BUS_DMASYNC_PREWRITE:
 			while (sl != end) {
-			    cpu_dcache_wb_range(sl->vaddr, sl->datacount);
-			    l2cache_wb_range(sl->vaddr, sl->busaddr,
-				sl->datacount);
-			    sl++;
+				cpu_dcache_wb_range(sl->vaddr, sl->datacount);
+				l2cache_wb_range(sl->vaddr, sl->busaddr,
+				    sl->datacount);
+				sl++;
 			}
 			break;
 
@@ -1454,12 +1464,14 @@ SYSINIT(bpages, SI_SUB_LOCK, SI_ORDER_ANY, init_bounce_pages, NULL);
 static struct sysctl_ctx_list *
 busdma_sysctl_tree(struct bounce_zone *bz)
 {
+
 	return (&bz->sysctl_tree);
 }
 
 static struct sysctl_oid *
 busdma_sysctl_tree_top(struct bounce_zone *bz)
 {
+
 	return (bz->sysctl_tree_top);
 }
 
