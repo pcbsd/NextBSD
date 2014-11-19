@@ -1,6 +1,10 @@
 /*-
- * Copyright (c) 1998 Nicolas Souchu
+ * Copyright (c) 2014 Ruslan Bukin <br@bsdpad.com>
  * All rights reserved.
+ *
+ * This software was developed by SRI International and the University of
+ * Cambridge Computer Laboratory under DARPA/AFRL contract (FA8750-10-C-0237)
+ * ("CTSRD"), as part of the DARPA CRASH research programme.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,54 +28,16 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD$
- *
  */
-#ifndef __IICBUS_H
-#define __IICBUS_H
 
-#include <sys/_lock.h>
-#include <sys/_mutex.h>
+#define	PIO_DATA	0x00
+#define	PIO_DIR		0x04
+#define	 PIO_OUT(n)	(1 << n)
+#define	 PIO_OUT_ALL	0xffffffff
+#define	PIO_INT_MASK	0x08
+#define	 PIO_UNMASK(n)	(1 << n)
+#define	 PIO_UNMASK_ALL	0xffffffff
+#define	PIO_EDGECAPT	0x0c
+#define	PIO_OUTSET	0x10
+#define	PIO_OUTCLR	0x14
 
-#define IICBUS_IVAR(d) (struct iicbus_ivar *) device_get_ivars(d)
-#define IICBUS_SOFTC(d) (struct iicbus_softc *) device_get_softc(d)
-
-struct iicbus_softc
-{
-	device_t dev;		/* Myself */
-	device_t owner;		/* iicbus owner device structure */
-	u_char started;		/* address of the 'started' slave
-				 * 0 if no start condition succeeded */
-	u_char strict;		/* deny operations that violate the
-				 * I2C protocol */
-	struct mtx lock;
-	u_int bus_freq;		/* Configured bus Hz. */
-};
-
-struct iicbus_ivar
-{
-	uint32_t	addr;
-	bool		nostop;
-};
-
-enum {
-	IICBUS_IVAR_ADDR,		/* Address or base address */
-	IICBUS_IVAR_NOSTOP,		/* nostop defaults */
-};
-
-#define IICBUS_ACCESSOR(A, B, T)					\
-	__BUS_ACCESSOR(iicbus, A, IICBUS, B, T)
-	
-IICBUS_ACCESSOR(addr,		ADDR,		uint32_t)
-IICBUS_ACCESSOR(nostop,		NOSTOP,		bool)
-
-#define	IICBUS_LOCK(sc)			mtx_lock(&(sc)->lock)
-#define	IICBUS_UNLOCK(sc)      		mtx_unlock(&(sc)->lock)
-#define	IICBUS_ASSERT_LOCKED(sc)       	mtx_assert(&(sc)->lock, MA_OWNED)
-
-int  iicbus_generic_intr(device_t dev, int event, char *buf);
-void iicbus_init_frequency(device_t dev, u_int bus_freq);
-
-extern driver_t iicbus_driver;
-extern devclass_t iicbus_devclass;
-
-#endif

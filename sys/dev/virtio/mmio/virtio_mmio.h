@@ -1,6 +1,10 @@
 /*-
- * Copyright (c) 1998 Nicolas Souchu
+ * Copyright (c) 2014 Ruslan Bukin <br@bsdpad.com>
  * All rights reserved.
+ *
+ * This software was developed by SRI International and the University of
+ * Cambridge Computer Laboratory under DARPA/AFRL contract (FA8750-10-C-0237)
+ * ("CTSRD"), as part of the DARPA CRASH research programme.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,54 +28,36 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD$
- *
  */
-#ifndef __IICBUS_H
-#define __IICBUS_H
 
-#include <sys/_lock.h>
-#include <sys/_mutex.h>
+#ifndef	_VIRTIO_MMIO_H
+#define	_VIRTIO_MMIO_H
 
-#define IICBUS_IVAR(d) (struct iicbus_ivar *) device_get_ivars(d)
-#define IICBUS_SOFTC(d) (struct iicbus_softc *) device_get_softc(d)
+#define	VIRTIO_MMIO_MAGIC_VALUE		0x000
+#define	VIRTIO_MMIO_VERSION		0x004
+#define	VIRTIO_MMIO_DEVICE_ID		0x008
 
-struct iicbus_softc
-{
-	device_t dev;		/* Myself */
-	device_t owner;		/* iicbus owner device structure */
-	u_char started;		/* address of the 'started' slave
-				 * 0 if no start condition succeeded */
-	u_char strict;		/* deny operations that violate the
-				 * I2C protocol */
-	struct mtx lock;
-	u_int bus_freq;		/* Configured bus Hz. */
-};
+#define	VIRTIO_MMIO_MAGIC_VALUE		0x000
+#define	VIRTIO_MMIO_VERSION		0x004
+#define	VIRTIO_MMIO_DEVICE_ID		0x008
+#define	VIRTIO_MMIO_VENDOR_ID		0x00c
+#define	VIRTIO_MMIO_HOST_FEATURES	0x010
+#define	VIRTIO_MMIO_HOST_FEATURES_SEL	0x014
+#define	VIRTIO_MMIO_GUEST_FEATURES	0x020
+#define	VIRTIO_MMIO_GUEST_FEATURES_SEL	0x024
+#define	VIRTIO_MMIO_GUEST_PAGE_SIZE	0x028
+#define	VIRTIO_MMIO_QUEUE_SEL		0x030
+#define	VIRTIO_MMIO_QUEUE_NUM_MAX	0x034
+#define	VIRTIO_MMIO_QUEUE_NUM		0x038
+#define	VIRTIO_MMIO_QUEUE_ALIGN		0x03c
+#define	VIRTIO_MMIO_QUEUE_PFN		0x040
+#define	VIRTIO_MMIO_QUEUE_NOTIFY	0x050
+#define	VIRTIO_MMIO_INTERRUPT_STATUS	0x060
+#define	VIRTIO_MMIO_INTERRUPT_ACK	0x064
+#define	VIRTIO_MMIO_STATUS		0x070
+#define	VIRTIO_MMIO_CONFIG		0x100
+#define	VIRTIO_MMIO_INT_VRING		(1 << 0)
+#define	VIRTIO_MMIO_INT_CONFIG		(1 << 1)
+#define	VIRTIO_MMIO_VRING_ALIGN		4096
 
-struct iicbus_ivar
-{
-	uint32_t	addr;
-	bool		nostop;
-};
-
-enum {
-	IICBUS_IVAR_ADDR,		/* Address or base address */
-	IICBUS_IVAR_NOSTOP,		/* nostop defaults */
-};
-
-#define IICBUS_ACCESSOR(A, B, T)					\
-	__BUS_ACCESSOR(iicbus, A, IICBUS, B, T)
-	
-IICBUS_ACCESSOR(addr,		ADDR,		uint32_t)
-IICBUS_ACCESSOR(nostop,		NOSTOP,		bool)
-
-#define	IICBUS_LOCK(sc)			mtx_lock(&(sc)->lock)
-#define	IICBUS_UNLOCK(sc)      		mtx_unlock(&(sc)->lock)
-#define	IICBUS_ASSERT_LOCKED(sc)       	mtx_assert(&(sc)->lock, MA_OWNED)
-
-int  iicbus_generic_intr(device_t dev, int event, char *buf);
-void iicbus_init_frequency(device_t dev, u_int bus_freq);
-
-extern driver_t iicbus_driver;
-extern devclass_t iicbus_devclass;
-
-#endif
+#endif /* _VIRTIO_MMIO_H */
