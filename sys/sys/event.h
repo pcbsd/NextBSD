@@ -135,10 +135,11 @@ struct kevent {
 #define	NOTE_CHILD	0x00000004		/* am a child process */
 
 /* additional flags for EVFILT_TIMER */
-#define NOTE_SECONDS		0x00000001	/* data is seconds */
+#define NOTE_SECONDS		0x00000001	/* data is seconds	*/
 #define NOTE_MSECONDS		0x00000002	/* data is milliseconds */
 #define NOTE_USECONDS		0x00000004	/* data is microseconds */
-#define NOTE_NSECONDS		0x00000008	/* data is nanoseconds */
+#define NOTE_NSECONDS		0x00000008	/* data is nanoseconds  */
+#define NOTE_ABSOLUTE		0x00000010	/* absolute timeout     */
 
 struct knote;
 SLIST_HEAD(klist, knote);
