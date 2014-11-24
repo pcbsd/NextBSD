@@ -1292,6 +1292,8 @@ _kerberos5_bootstrap_tools= \
 	usr.bin/compile_et
 .endif
 
+_mig=	usr.bin/migcom
+
 #	Please document (add comment) why something is in 'bootstrap-tools'.
 #	Try to bound the building of the bootstrap-tool to just the
 #	FreeBSD versions that need the tool built at this stage of the build.
@@ -1423,6 +1425,7 @@ cross-tools: .MAKE
     ${_btxld} \
     ${_crunchide} \
     ${_kgzip} \
+    ${_mig} \
     sys/boot/usb/tools
 	${_+_}@${ECHODIR} "===> ${_tool} (obj,depend,all,install)"; \
 		cd ${.CURDIR}/${_tool} && \
