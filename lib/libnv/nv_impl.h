@@ -42,7 +42,12 @@ typedef struct nvpair nvpair_t;
 #define	NV_TYPE_NVLIST_UP		255
 
 #define	NV_TYPE_FIRST		NV_TYPE_NULL
-#define	NV_TYPE_LAST		NV_TYPE_BINARY
+#define	NV_TYPE_LAST		NV_TYPE_ENDPOINT
+
+#define NV_TYPE_NUMBER_MIN NV_TYPE_NUMBER
+#define NV_TYPE_NUMBER_MAX NV_TYPE_ENDPOINT
+
+
 
 #define	NV_FLAG_BIG_ENDIAN		0x80
 
@@ -76,6 +81,7 @@ nvpair_t *nvpair_clone(const nvpair_t *nvp);
 nvpair_t *nvpair_create_null(const char *name);
 nvpair_t *nvpair_create_bool(const char *name, bool value);
 nvpair_t *nvpair_create_number(const char *name, uint64_t value);
+nvpair_t *nvpair_create_number_type(const char *name, uint64_t value, int type);
 nvpair_t *nvpair_create_string(const char *name, const char *value);
 nvpair_t *nvpair_create_stringf(const char *name, const char *valuefmt, ...) __printflike(2, 3);
 nvpair_t *nvpair_create_stringv(const char *name, const char *valuefmt, va_list valueap) __printflike(2, 0);
@@ -116,6 +122,7 @@ nvpair_t *nvpair_createf_binary(const void *value, size_t size, const char *name
 nvpair_t *nvpair_createv_null(const char *namefmt, va_list nameap) __printflike(1, 0);
 nvpair_t *nvpair_createv_bool(bool value, const char *namefmt, va_list nameap) __printflike(2, 0);
 nvpair_t *nvpair_createv_number(uint64_t value, const char *namefmt, va_list nameap) __printflike(2, 0);
+nvpair_t *nvpair_createv_number_type(uint64_t value, int type, const char *namefmt, va_list nameap) __printflike(3, 0);
 nvpair_t *nvpair_createv_string(const char *value, const char *namefmt, va_list nameap) __printflike(2, 0);
 nvpair_t *nvpair_createv_nvlist(const nvlist_t *value, const char *namefmt, va_list nameap) __printflike(2, 0);
 nvpair_t *nvpair_createv_descriptor(int value, const char *namefmt, va_list nameap) __printflike(2, 0);

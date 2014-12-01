@@ -52,11 +52,17 @@ typedef struct nvlist nvlist_t;
 
 #define	NV_TYPE_NULL			1
 #define	NV_TYPE_BOOL			2
-#define	NV_TYPE_NUMBER			3
-#define	NV_TYPE_STRING			4
-#define	NV_TYPE_NVLIST			5
-#define	NV_TYPE_DESCRIPTOR		6
-#define	NV_TYPE_BINARY			7
+#define	NV_TYPE_STRING			3
+#define	NV_TYPE_NVLIST			4
+#define	NV_TYPE_DESCRIPTOR		5
+#define	NV_TYPE_BINARY			6
+
+#define	NV_TYPE_NUMBER			7
+#define NV_TYPE_PTR				8
+#define NV_TYPE_UINT64			9
+#define NV_TYPE_INT64			10
+#define NV_TYPE_ENDPOINT		11
+
 
 /*
  * Perform case-insensitive lookups of provided names.
@@ -110,6 +116,7 @@ bool nvlist_exists_binary(const nvlist_t *nvl, const char *name);
 void nvlist_add_null(nvlist_t *nvl, const char *name);
 void nvlist_add_bool(nvlist_t *nvl, const char *name, bool value);
 void nvlist_add_number(nvlist_t *nvl, const char *name, uint64_t value);
+void nvlist_add_number_type(nvlist_t *nvl, const char *name, uint64_t value, int type);
 void nvlist_add_string(nvlist_t *nvl, const char *name, const char *value);
 void nvlist_add_stringf(nvlist_t *nvl, const char *name, const char *valuefmt, ...) __printflike(3, 4);
 void nvlist_add_stringv(nvlist_t *nvl, const char *name, const char *valuefmt, va_list valueap) __printflike(3, 0);
@@ -199,6 +206,7 @@ bool nvlist_existsv_binary(const nvlist_t *nvl, const char *namefmt, va_list nam
 void nvlist_addf_null(nvlist_t *nvl, const char *namefmt, ...) __printflike(2, 3);
 void nvlist_addf_bool(nvlist_t *nvl, bool value, const char *namefmt, ...) __printflike(3, 4);
 void nvlist_addf_number(nvlist_t *nvl, uint64_t value, const char *namefmt, ...) __printflike(3, 4);
+void nvlist_addf_number_type(nvlist_t *nvl, uint64_t value, int type, const char *namefmt, ...) __printflike(4, 5);
 void nvlist_addf_string(nvlist_t *nvl, const char *value, const char *namefmt, ...) __printflike(3, 4);
 void nvlist_addf_nvlist(nvlist_t *nvl, const nvlist_t *value, const char *namefmt, ...) __printflike(3, 4);
 void nvlist_addf_descriptor(nvlist_t *nvl, int value, const char *namefmt, ...) __printflike(3, 4);
@@ -207,6 +215,7 @@ void nvlist_addf_binary(nvlist_t *nvl, const void *value, size_t size, const cha
 void nvlist_addv_null(nvlist_t *nvl, const char *namefmt, va_list nameap) __printflike(2, 0);
 void nvlist_addv_bool(nvlist_t *nvl, bool value, const char *namefmt, va_list nameap) __printflike(3, 0);
 void nvlist_addv_number(nvlist_t *nvl, uint64_t value, const char *namefmt, va_list nameap) __printflike(3, 0);
+void nvlist_addv_number_type(nvlist_t *nvl, uint64_t value, int type, const char *namefmt, va_list nameap) __printflike(4, 0);
 void nvlist_addv_string(nvlist_t *nvl, const char *value, const char *namefmt, va_list nameap) __printflike(3, 0);
 void nvlist_addv_nvlist(nvlist_t *nvl, const nvlist_t *value, const char *namefmt, va_list nameap) __printflike(3, 0);
 void nvlist_addv_descriptor(nvlist_t *nvl, int value, const char *namefmt, va_list nameap) __printflike(3, 0);

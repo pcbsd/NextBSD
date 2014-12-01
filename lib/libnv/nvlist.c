@@ -372,6 +372,10 @@ nvlist_dump(const nvlist_t *nvl, int fd)
 			    "TRUE" : "FALSE");
 			break;
 		case NV_TYPE_NUMBER:
+		case NV_TYPE_PTR:
+		case NV_TYPE_UINT64:
+		case NV_TYPE_INT64:
+		case NV_TYPE_ENDPOINT:
 			dprintf(fd, " %ju (%jd) (0x%jx)\n",
 			    (uintmax_t)nvpair_get_number(nvp),
 			    (intmax_t)nvpair_get_number(nvp),
@@ -611,6 +615,10 @@ nvlist_xpack(const nvlist_t *nvl, int64_t *fdidxp, size_t *sizep)
 			ptr = nvpair_pack_bool(nvp, ptr, &left);
 			break;
 		case NV_TYPE_NUMBER:
+		case NV_TYPE_PTR:
+		case NV_TYPE_UINT64:
+		case NV_TYPE_INT64:
+		case NV_TYPE_ENDPOINT:
 			ptr = nvpair_pack_number(nvp, ptr, &left);
 			break;
 		case NV_TYPE_STRING:
@@ -768,6 +776,10 @@ nvlist_xunpack(const void *buf, size_t size, const int *fds, size_t nfds)
 			ptr = nvpair_unpack_bool(isbe, nvp, ptr, &left);
 			break;
 		case NV_TYPE_NUMBER:
+		case NV_TYPE_PTR:
+		case NV_TYPE_UINT64:
+		case NV_TYPE_INT64:
+		case NV_TYPE_ENDPOINT:
 			ptr = nvpair_unpack_number(isbe, nvp, ptr, &left);
 			break;
 		case NV_TYPE_STRING:
@@ -1119,6 +1131,13 @@ nvlist_add_number(nvlist_t *nvl, const char *name, uint64_t value)
 }
 
 void
+nvlist_add_number_type(nvlist_t *nvl, const char *name, uint64_t value, int type)
+{
+
+	nvlist_addf_number_type(nvl, value, type, "%s", name);
+}
+
+void
 nvlist_add_string(nvlist_t *nvl, const char *name, const char *value)
 {
 
@@ -1202,6 +1221,16 @@ nvlist_addf_number(nvlist_t *nvl, uint64_t value, const char *namefmt, ...)
 
 	va_start(nameap, namefmt);
 	nvlist_addv_number(nvl, value, namefmt, nameap);
+	va_end(nameap);
+}
+
+void
+nvlist_addf_number_type(nvlist_t *nvl, uint64_t value, int type, const char *namefmt, ...)
+{
+	va_list nameap;
+
+	va_start(nameap, namefmt);
+	nvlist_addv_number_type(nvl, value, type, namefmt, nameap);
 	va_end(nameap);
 }
 
@@ -1293,6 +1322,24 @@ nvlist_addv_number(nvlist_t *nvl, uint64_t value, const char *namefmt,
 	}
 
 	nvp = nvpair_createv_number(value, namefmt, nameap);
+	if (nvp == NULL)
+		nvl->nvl_error = errno = (errno != 0 ? errno : ENOMEM);
+	else
+		nvlist_move_nvpair(nvl, nvp);
+}
+
+void
+nvlist_addv_number_type(nvlist_t *nvl, uint64_t value, int type, const char *namefmt,
+    va_list nameap)
+{
+	nvpair_t *nvp;
+
+	if (nvlist_error(nvl) != 0) {
+		errno = nvlist_error(nvl);
+		return;
+	}
+
+	nvp = nvpair_createv_number_type(value, type, namefmt, nameap);
 	if (nvp == NULL)
 		nvl->nvl_error = errno = (errno != 0 ? errno : ENOMEM);
 	else

@@ -176,7 +176,11 @@ nvpair_clone(const nvpair_t *nvp)
 		newnvp = nvpair_create_bool(name, nvpair_get_bool(nvp));
 		break;
 	case NV_TYPE_NUMBER:
-		newnvp = nvpair_create_number(name, nvpair_get_number(nvp));
+	case NV_TYPE_PTR:
+	case NV_TYPE_UINT64:
+	case NV_TYPE_INT64:
+	case NV_TYPE_ENDPOINT:
+		newnvp = nvpair_create_number_type(name, nvpair_get_number(nvp), nvpair_type(nvp));
 		break;
 	case NV_TYPE_STRING:
 		newnvp = nvpair_create_string(name, nvpair_get_string(nvp));
@@ -701,6 +705,7 @@ nvpair_allocv(int type, uint64_t data, size_t datasize, const char *namefmt,
 
 	PJDLOG_ASSERT(type >= NV_TYPE_FIRST && type <= NV_TYPE_LAST);
 
+
 	namelen = vasprintf(&name, namefmt, nameap);
 	if (namelen < 0)
 		return (NULL);
@@ -911,10 +916,12 @@ nvpair_createv_bool(bool value, const char *namefmt, va_list nameap)
 }
 
 nvpair_t *
-nvpair_createv_number(uint64_t value, const char *namefmt, va_list nameap)
+nvpair_createv_number_type(uint64_t value, int type, const char *namefmt, va_list nameap)
 {
+	if (type > NV_TYPE_NUMBER_MAX || type < NV_TYPE_NUMBER_MIN)
+		return (NULL);
 
-	return (nvpair_allocv(NV_TYPE_NUMBER, value, sizeof(value), namefmt,
+	return (nvpair_allocv(type, value, sizeof(value), namefmt,
 	    nameap));
 }
 
@@ -1276,6 +1283,14 @@ nvpair_type_string(int type)
 		return ("DESCRIPTOR");
 	case NV_TYPE_BINARY:
 		return ("BINARY");
+	case NV_TYPE_PTR:
+		return ("PTR");
+	case NV_TYPE_UINT64:
+		return ("UINT64");
+	case NV_TYPE_INT64:
+		return ("INT64");
+	case NV_TYPE_ENDPOINT:
+		return ("ENDPOINT");
 	default:
 		return ("<UNKNOWN>");
 	}
