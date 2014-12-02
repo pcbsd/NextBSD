@@ -36,7 +36,7 @@
 
 #include "nv.h"
 
-void *nvlist_xpack(const nvlist_t *nvl, int64_t *fdidxp, size_t *sizep);
+void *nvlist_xpack(const nvlist_t *nvl, void *ubuf, int64_t *fdidxp, size_t *sizep);
 nvlist_t *nvlist_xunpack(const void *buf, size_t size, const int *fds,
     size_t nfds);
 
