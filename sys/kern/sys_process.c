@@ -1424,3 +1424,17 @@ kern_procctl(struct thread *td, idtype_t idtype, id_t id, int com, void *data)
 	sx_sunlock(&proctree_lock);
 	return (error);
 }
+
+int
+sys___proc_info(struct thread *td __unused, struct __proc_info_args *uap __unused)
+{
+
+	return (ENOSYS);
+}
+
+int
+sys___iopolicysys(struct thread *td __unused, struct __iopolicysys_args *uap __unused)
+{
+
+	return (ENOSYS);
+}
