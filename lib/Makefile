@@ -40,9 +40,10 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	${_libcom_err} \
 	libcompat \
 	libcrypt \
-	libcfxlite \
+	${_libcfxlite} \
 	libdevinfo \
 	libdevstat \
+	${_libdispatch} \
 	libdpv \
 	libdwarf \
 	libedit \
@@ -65,7 +66,7 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	${_liblaunch} \
 	${_libldns} \
 	liblzma \
-	libmach \
+	${_libmach} \
 	libmagic \
 	libmandoc \
 	libmemstat \
@@ -116,6 +117,7 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	${_libvmmapi} \
 	libwrap \
 	libxo \
+	libxpc \
 	liby \
 	${_libypclnt} \
 	libz \
@@ -253,6 +255,9 @@ _librtld_db=	librtld_db
 .endif
 
 .if ${MACHINE_CPUARCH} == "amd64"
+_libcfxlite= libcfxlite
+_libdispatch= libdispatch
+_libmach= libmach
 _libvmmapi=	libvmmapi
 .endif
 

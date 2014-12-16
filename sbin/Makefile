@@ -40,6 +40,7 @@ SUBDIR=adjkerntz \
 	kldload \
 	kldstat \
 	kldunload \
+	launchd \
 	ldconfig \
 	md5 \
 	mdconfig \
