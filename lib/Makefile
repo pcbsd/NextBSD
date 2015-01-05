@@ -257,6 +257,7 @@ _librtld_db=	librtld_db
 .if ${MACHINE_CPUARCH} == "amd64"
 _libcfxlite= libcfxlite
 _libdispatch= libdispatch
+_liblaunch=	liblaunch
 _libmach= libmach
 _libvmmapi=	libvmmapi
 .endif
@@ -266,7 +267,6 @@ _libproc=	libproc
 _librtld_db=	librtld_db
 .endif
 
-_liblaunch=	liblaunch
 
 .if ${MACHINE_CPUARCH} == "powerpc"
 _libproc=	libproc
