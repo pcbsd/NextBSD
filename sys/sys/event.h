@@ -210,8 +210,6 @@ struct knlist {
 
 
 #ifdef _KERNEL
-#include "opt_compat_mach.h"
-
 /*
  * Flags for knote call
  */
