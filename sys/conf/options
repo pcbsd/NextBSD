@@ -928,5 +928,4 @@ RANDOM_DEBUG	opt_random.h
 # Mach support options
 COMPAT_MACH_STATIC
 COMPAT_MACH_PORT_DEBUG opt_compat_mach.h
-NO_COMPAT_MACH		   opt_global.h
 
