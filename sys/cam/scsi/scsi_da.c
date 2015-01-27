@@ -1910,18 +1910,18 @@ dadeletemaxsize(struct da_softc *softc, da_delete_methods delete_method)
 		sectors = (off_t)ATA_DSM_RANGE_MAX * softc->trim_max_ranges;
 		break;
 	case DA_DELETE_WS16:
-		sectors = (off_t)min(softc->ws_max_blks, WS16_MAX_BLKS);
+		sectors = omin(softc->ws_max_blks, WS16_MAX_BLKS);
 		break;
 	case DA_DELETE_ZERO:
 	case DA_DELETE_WS10:
-		sectors = (off_t)min(softc->ws_max_blks, WS10_MAX_BLKS);
+		sectors = omin(softc->ws_max_blks, WS10_MAX_BLKS);
 		break;
 	default:
 		return 0;
 	}
 
 	return (off_t)softc->params.secsize *
-	    min(sectors, (off_t)softc->params.sectors);
+	    omin(sectors, softc->params.sectors);
 }
 
 static void
@@ -2684,7 +2684,7 @@ da_delete_trim(struct cam_periph *periph, union ccb *ccb, struct bio *bp)
 
 		/* Try to extend the previous range. */
 		if (lba == lastlba) {
-			c = min(count, ATA_DSM_RANGE_MAX - lastcount);
+			c = omin(count, ATA_DSM_RANGE_MAX - lastcount);
 			lastcount += c;
 			off = (ranges - 1) * 8;
 			buf[off + 6] = lastcount & 0xff;
@@ -2694,7 +2694,7 @@ da_delete_trim(struct cam_periph *periph, union ccb *ccb, struct bio *bp)
 		}
 
 		while (count > 0) {
-			c = min(count, ATA_DSM_RANGE_MAX);
+			c = omin(count, ATA_DSM_RANGE_MAX);
 			off = ranges * 8;
 
 			buf[off + 0] = lba & 0xff;
@@ -2770,7 +2770,7 @@ da_delete_ws(struct cam_periph *periph, union ccb *ccb, struct bio *bp)
 			    "%s issuing short delete %ld > %ld\n",
 			    da_delete_method_desc[softc->delete_method],
 			    count, ws_max_blks);
-			count = min(count, ws_max_blks);
+			count = omin(count, ws_max_blks);
 			break;
 		}
 		bp1 = bioq_first(&softc->delete_queue);
@@ -3018,6 +3018,16 @@ dadone(struct cam_periph *periph, union ccb *done_ccb)
 			TAILQ_INIT(&queue);
 			TAILQ_CONCAT(&queue, &softc->delete_run_queue.queue, bio_queue);
 			softc->delete_run_queue.insert_point = NULL;
+			/*
+			 * Normally, the xpt_release_ccb() above would make sure
+			 * that when we have more work to do, that work would
+			 * get kicked off. However, we specifically keep
+			 * delete_running set to 0 before the call above to
+			 * allow other I/O to progress when many BIO_DELETE
+			 * requests are pushed down. We set delete_running to 0
+			 * and call daschedule again so that we don't stall if
+			 * there are no other I/Os pending apart from BIO_DELETEs.
+			 */
 			softc->delete_running = 0;
 			daschedule(periph);
 			cam_periph_unlock(periph);
@@ -3091,11 +3101,10 @@ dadone(struct cam_periph *periph, union ccb *done_ccb)
 			 * give them an 'illegal' value we'll avoid that
 			 * here.
 			 */
-			if (block_size == 0 && maxsector == 0) {
+			if (block_size == 0) {
 				block_size = 512;
-				maxsector = -1;
-			} else if (block_size == 0) {
-				block_size = 512;
+				if (maxsector == 0)
+					maxsector = -1;
 			}
 			if (block_size >= MAXPHYS) {
 				xpt_print(periph->path,

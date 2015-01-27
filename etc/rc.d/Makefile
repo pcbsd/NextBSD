@@ -11,26 +11,18 @@ FILES=	DAEMON \
 	accounting \
 	addswap \
 	adjkerntz \
-	amd \
-	apm \
-	apmd \
 	archdep \
 	atm1 \
 	atm2 \
 	atm3 \
 	auditd \
 	auditdistd \
-	automount \
-	automountd \
-	autounmountd \
 	bgfsck \
 	${_bluetooth} \
 	bootparams \
 	bridge \
-	bsnmpd \
 	${_bthidd} \
 	${_casperd} \
-	ccd \
 	cleanvar \
 	cleartmp \
 	cron \
@@ -50,7 +42,6 @@ FILES=	DAEMON \
 	gptboot \
 	growfs \
 	gssd \
-	hastd \
 	${_hcsecd} \
 	hostapd \
 	hostid \
@@ -63,12 +54,7 @@ FILES=	DAEMON \
 	ipfw \
 	ipmon \
 	ipnat \
-	ipropd_master \
-	ipropd_slave \
 	ipsec \
-	iscsictl \
-	iscsid \
-	jail \
 	${_kadmind} \
 	${_kdc} \
 	${_kfd} \
@@ -79,7 +65,6 @@ FILES=	DAEMON \
 	local \
 	localpkg \
 	lockd \
-	lpd \
 	mixer \
 	motd \
 	mountcritlocal \
@@ -111,7 +96,6 @@ FILES=	DAEMON \
 	pflog \
 	pfsync \
 	powerd \
-	power_profile \
 	ppp \
 	pppoed \
 	pwcheck \
@@ -163,6 +147,29 @@ FILES=	DAEMON \
 	zfs \
 	zvol
 
+.if ${MK_ACCT} != "no"
+FILES+=		accounting
+.endif
+
+.if ${MK_ACPI} != "no"
+FILES+=		power_profile
+.endif
+
+.if ${MK_AMD} != "no"
+FILES+=		amd
+.endif
+
+.if ${MK_APM} != "no"
+FILES+=	apm
+FILES+=	apmd
+.endif
+
+.if ${MK_AUTOFS} != "no"
+FILES+=		automount
+FILES+=		automountd
+FILES+=		autounmountd
+.endif
+
 .if ${MK_BLUETOOTH} != "no"
 _bluetooth=	bluetooth
 _bthidd=	bthidd
@@ -170,8 +177,33 @@ _hcsecd=	hcsecd
 _ubthidhci=	ubthidhci
 .endif
 
+.if ${MK_BSNMP} != "no"
+FILES+=		bsnmpd
+.endif
+
 .if ${MK_CASPER} != "no"
 _casperd=	casperd
+.endif
+
+.if ${MK_CCD} != "no"
+FILES+=		ccd
+.endif
+
+.if ${MK_HAST} != "no"
+FILES+=		hastd
+.endif
+
+.if ${MK_ISCSI} != "no"
+FILES+=		iscsictl
+FILES+=		iscsid
+.endif
+
+.if ${MK_JAIL} != "no"
+FILES+=	jail
+.endif
+
+.if ${MK_LPR} != "no"
+FILES+=		lpd
 .endif
 
 .if ${MK_NS_CACHING} != "no"
@@ -179,6 +211,8 @@ _nscd=		nscd
 .endif
 
 .if ${MK_KERBEROS} != "no"
+FILES+=		ipropd_master
+FILES+=		ipropd_slave
 _kadmind=	kadmind
 _kdc=		kdc
 _kfd=		kfd
@@ -211,6 +245,11 @@ _unbound=	local_unbound
 
 .if ${MK_UTMPX} != "no"
 _utx=		utx
+.endif
+
+.if ${MK_WIRELESS} != "no"
+FILES+=		hostapd
+FILES+=		wpa_supplicant
 .endif
 
 FILESDIR=	/etc/rc.d
