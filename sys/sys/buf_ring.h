@@ -41,20 +41,31 @@
 #include <sys/mutex.h>
 #endif
 
+struct br_entry_ {
+	volatile void *bre_ptr;
+};
+
+
 struct buf_ring {
 	volatile uint32_t	br_prod_head;
 	volatile uint32_t	br_prod_tail;	
 	int              	br_prod_size;
 	int              	br_prod_mask;
 	uint64_t		br_drops;
+	/* cache line aligned to avoid cache line invalidate traffic
+	 * between consumer and producer (false sharing)
+	 */
 	volatile uint32_t	br_cons_head __aligned(CACHE_LINE_SIZE);
 	volatile uint32_t	br_cons_tail;
 	int		 	br_cons_size;
 	int              	br_cons_mask;
 #ifdef DEBUG_BUFRING
 	struct mtx		*br_lock;
-#endif	
-	void			*br_ring[0] __aligned(CACHE_LINE_SIZE);
+#endif
+	/* cache line aligned to avoid false sharing with other data structures
+	 * located just beyond the end of the ring
+	 */
+	struct br_entry_	br_ring[0] __aligned(CACHE_LINE_SIZE);
 };
 
 /*
@@ -147,7 +158,7 @@ buf_ring_enqueue(struct buf_ring *br, void *buf)
 	int i;
 	for (i = br->br_cons_head; i != br->br_prod_head;
 	     i = ((i + 1) & br->br_cons_mask))
-		if(br->br_ring[i] == buf)
+		if(br->br_ring[i].bre_ptr == buf)
 			panic("buf=%p already enqueue at %d prod=%d cons=%d",
 			    buf, i, br->br_prod_tail, br->br_cons_tail);
 #endif	
@@ -172,19 +183,19 @@ buf_ring_enqueue(struct buf_ring *br, void *buf)
 		}
 	} while (!atomic_cmpset_acq_32(&br->br_prod_head, prod_head, prod_next));
 #ifdef DEBUG_BUFRING
-	if (br->br_ring[prod_head] != NULL)
+	if (br->br_ring[prod_head].bre_ptr != NULL)
 		panic("dangling value in enqueue");
 #endif	
-	br->br_ring[prod_head] = buf;
+	br->br_ring[prod_head].bre_ptr = buf;
 
 	/*
 	 * If there are other enqueues in progress
-	 * that preceeded us, we need to wait for them
+	 * that preceded us, we need to wait for them
 	 * to complete
 	 * re-ordering of reads would not effect correctness
 	 */
 	while (br->br_prod_tail != prod_head)
-			cpu_spinwait();
+		cpu_spinwait();
 	/* ensure  that the ring update reaches memory before the new
 	 * value of prod_tail
 	 */
@@ -201,13 +212,14 @@ static __inline void *
 buf_ring_dequeue_mc(struct buf_ring *br)
 {
 	uint32_t cons_head, cons_next;
-	void *buf;
+	volatile void *buf;
 
 	critical_enter();
 	do {
 		/*
-		 * There is no logical ordering required in the ordering of the
-		 * prod_tail and cons_head
+		 * prod_tail must be read before br_ring[cons_head] is
+		 * and the atomic_cmpset_acq_32 on br_cons_head should
+		 * enforce that
 		 */
 		cons_head = br->br_cons_head;
 		if (cons_head == br->br_prod_tail) {
@@ -220,27 +232,27 @@ buf_ring_dequeue_mc(struct buf_ring *br)
 	/* ensure that the read completes before either of the
 	 * subsequent stores
 	 */
-	buf = br->br_ring[cons_head];
+	buf = br->br_ring[cons_head].bre_ptr;
 	/* guarantee that the load completes before we update cons_tail */
-	br->br_ring[cons_head] = NULL;
+	br->br_ring[cons_head].bre_ptr = NULL;
 
 	/*
 	 * If there are other dequeues in progress
-	 * that preceeded us, we need to wait for them
+	 * that preceded us, we need to wait for them
 	 * to complete - no memory barrier needed as
 	 * re-ordering shouldn't effect correctness or
 	 * progress
 	 */
 	while (br->br_cons_tail != cons_head)
 		cpu_spinwait();
-	/* rather than doing a atomic_load_acq_ptr() on the ring
-	 * we guarantee that the load completes first by ensuring
-	 * release semantics on tail - this is cheaper on x86
+	/*
+	 * assure that the ring entry is read before
+	 * marking the entry as free by updating cons_tail
 	 */
 	atomic_store_rel_32(&br->br_cons_tail, cons_next);
 	critical_exit();
 
-	return (buf);
+	return ((void *)buf);
 }
 
 /*
@@ -256,33 +268,35 @@ buf_ring_dequeue_sc(struct buf_ring *br)
 	uint32_t cons_next_next;
 	uint32_t prod_tail;
 #endif
-	void *buf;
+	volatile void *buf;
 
-retry:
 	/*
 	 * prod_tail tells whether or not br_ring[cons_head] is valid
 	 * thus we must guarantee that it is read first
 	 */
 	cons_head = br->br_cons_head;
-	if (cons_head == ORDERED_LOAD_32(&br->br_prod_tail)) {
-		if (cons_head != atomic_load_acq_32(&br->br_prod_tail))
-			goto retry;
+	if (cons_head == ORDERED_LOAD_32(&br->br_prod_tail))
 		return (NULL);
-	}
+
 	cons_next = (cons_head + 1) & br->br_cons_mask;
 #ifdef PREFETCH_DEFINED
+	/*
+	 * If prod_tail is stale we will prefetch the wrong value - but this is safe
+	 * as cache coherence (should) ensure that the when the value is loaded for
+	 * actual use it is fetched from main memory
+	 */
 	prod_tail = br->br_prod_tail;
 	cons_next_next = (cons_head + 2) & br->br_cons_mask;
 	if (cons_next != prod_tail) {		
-		prefetch(br->br_ring[cons_next]);
+		prefetch(br->br_ring[cons_next].bre_ptr);
 		if (cons_next_next != prod_tail) 
-			prefetch(br->br_ring[cons_next_next]);
+			prefetch(br->br_ring[cons_next_next].bre_ptr);
 	}
 #endif
 	br->br_cons_head = cons_next;
-	buf = br->br_ring[cons_head];
+	buf = br->br_ring[cons_head].bre_ptr;
 	/* guarantee that the load completes before we update cons_tail */
-	br->br_ring[cons_head] = NULL;
+	br->br_ring[cons_head].bre_ptr = NULL;
 #ifdef DEBUG_BUFRING
 	if (!mtx_owned(br->br_lock))
 		panic("lock not held on single consumer dequeue");
@@ -292,7 +306,7 @@ retry:
 #endif
 	atomic_store_rel_32(&br->br_cons_tail, cons_next);
 
-	return (buf);
+	return ((void *)buf);
 }
 
 /*
@@ -320,9 +334,9 @@ buf_ring_advance_sc(struct buf_ring *br)
 	 *    (only the most perverted architecture or compiler would
 	 *    consider re-ordering a = *x; *x = b)
 	 * 2) it allows us to enforce global ordering of the cons_tail
-	 *    update with an atomic_store_rel_32 
+	 *    update with an atomic_store_rel_32
 	 */
-	br->br_ring[cons_head] = NULL;
+	br->br_ring[cons_head].bre_ptr = NULL;
 	atomic_store_rel_32(&br->br_cons_tail, cons_next);
 }
 
@@ -342,14 +356,13 @@ buf_ring_advance_sc(struct buf_ring *br)
  * if we have to do a multi-queue version we will need
  * the compare and an atomic.
  *
- * should be a no-op
  */
 static __inline void
 buf_ring_putback_sc(struct buf_ring *br, void *new)
 {
 	KASSERT(br->br_cons_head != br->br_prod_tail, 
 		("Buf-Ring has none in putback")) ;
-	br->br_ring[br->br_cons_head] = new;
+	br->br_ring[br->br_cons_head].bre_ptr = new;
 }
 
 /*
@@ -376,7 +389,7 @@ buf_ring_peek(struct buf_ring *br)
 	/* ensure that the ring load completes before
 	 * exposing it to any destructive updates
 	 */
-	return (br->br_ring[cons_head]);
+	return ((void *)br->br_ring[cons_head].bre_ptr);
 }
 
 static __inline int
