@@ -41,10 +41,12 @@
 #include <sys/mutex.h>
 #endif
 
+/* cache line align buf ring entries */
+#define BR_FLAGS_ALIGNED 0x1
+
 struct br_entry_ {
 	volatile void *bre_ptr;
 };
-
 
 struct buf_ring {
 	volatile uint32_t	br_prod_head;
@@ -63,10 +65,36 @@ struct buf_ring {
 	struct mtx		*br_lock;
 #endif
 	/* cache line aligned to avoid false sharing with other data structures
-	 * located just beyond the end of the ring
 	 */
+	int			br_flags  __aligned(CACHE_LINE_SIZE);
 	struct br_entry_	br_ring[0] __aligned(CACHE_LINE_SIZE);
 };
+
+/*
+ * ring entry accessors to allow us to make ring entry
+ * alignment determined at runtime
+ */
+static __inline void *
+br_entry_get(struct buf_ring *br, int i)
+{
+	volatile void *ent;
+
+	if (br->br_flags & BR_FLAGS_ALIGNED)
+		ent = br->br_ring[i*(CACHE_LINE_SIZE/sizeof(caddr_t))].bre_ptr;
+	else
+		ent = br->br_ring[i].bre_ptr;
+	return ((void *)ent);
+}
+
+static __inline void
+br_entry_set(struct buf_ring *br, int i, void *buf)
+{
+
+	if (br->br_flags & BR_FLAGS_ALIGNED)
+		br->br_ring[i*(CACHE_LINE_SIZE/sizeof(caddr_t))].bre_ptr = buf;
+	else
+		br->br_ring[i].bre_ptr = buf;
+}
 
 /*
  * Many architectures other than x86 permit speculative re-ordering
@@ -423,6 +451,8 @@ buf_ring_count(struct buf_ring *br)
 }
 
 struct buf_ring *buf_ring_alloc(int count, struct malloc_type *type, int flags,
+    struct mtx *);
+struct buf_ring *buf_ring_alloc_aligned(int count, struct malloc_type *type, int flags,
     struct mtx *);
 void buf_ring_free(struct buf_ring *br, struct malloc_type *type);
 
