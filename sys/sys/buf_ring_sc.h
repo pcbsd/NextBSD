@@ -42,18 +42,17 @@ struct buf_ring_sc_stats_v0 {
 	uint64_t brs_restarts;
 };
 
-#define ESTALLED        254      /* consumer is stalled */
-#define EOWNED          255      /* consumer lock acquired */
-typedef enum br_unlock_reason_ {
-	BR_UNLOCK_IDLE = 1,
-	BR_UNLOCK_ABDICATE,
-	BR_UNLOCK_STALLED
-} br_unlock_reason;
+struct buf_ring_sc_consumer {
+	int (*brsc_drain) (struct buf_ring_sc *br, int avail);
+	void (*brsc_deferred) (struct buf_ring_sc *br);
+	int brsc_flags;
+
+};
 
 /* cache line align buf ring entries */
 #define BR_FLAGS_ALIGNED 0x1
 
-struct buf_ring_sc *buf_ring_sc_alloc(int count, struct malloc_type *type, int mflags, int brflags);
+struct buf_ring_sc *buf_ring_sc_alloc(int count, struct malloc_type *type, int flags, struct buf_ring_sc_consumer *brsc);
 void buf_ring_sc_free(struct buf_ring_sc *br, struct malloc_type *type);
 void buf_ring_sc_reset_stats(struct buf_ring_sc *br);
 void buf_ring_sc_get_stats_v0(struct buf_ring_sc *br, struct buf_ring_sc_stats_v0 *brss);
@@ -61,48 +60,21 @@ void buf_ring_sc_get_stats_v0(struct buf_ring_sc *br, struct buf_ring_sc_stats_v
 /**
  * buf_ring_sc_enqueue - enqueue a buffer to the ring, possibly
  *  acquiring the consumer lock
- * @buf: buffer to enqueue
+ * @ents: buffers to enqueue
+ * @count: number of buffers
  *
  * return values:
  *  - 0        - success
- *  - ENOBUFS  - failure
- *  - ESTALLED - success, but the underlying driver is stalled
- *  - EOWNED   - success and caller is the new owner
- *
+ *  - ENOBUFS  - failure - could not enqueue all bufs
  */
-int buf_ring_sc_enqueue(struct buf_ring_sc *br, void *buf);
+int buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int budget);
 
 /**
- * PROPOSED:
- * buf_ring_sc_enqueue_multi - batch enqueue buffers to the ring, 
- * possibly acquiring the consumer lock
- * @ents: array of buffers to enqueue
- * @ent_count: size of ents
- * @qcount: the number of buffers enqueued
- * return values:
- *  - 0        - success
- *  - ENOBUFS  - failure
- *  - ESTALLED - success, but the underlying driver is stalled
- *  - EOWNED   - success and caller is the new owner
+ * buf_ring_sc_drain - check ring for entries and drain
+ * @budget: max entries to drain
  *
  */
-int buf_ring_sc_enqueue_multi(struct buf_ring_sc *br, void *ents[], int ent_count, int *qcount);
-
-/**
- * PROPOSED:
- * buf_ring_sc_enqueue_multi_atomic - batch enqueue buffers to the ring, 
- * possibly acquiring the consumer lock
- *
- * @ents: array of buffers to enqueue
- * @ent_count: size of ents
- * return values:
- *  - 0        - success
- *  - ENOBUFS  - failed to enqueue all buffers
- *  - ESTALLED - success, but the underlying driver is stalled
- *  - EOWNED   - success and caller is the new owner
- *
- */
-int buf_ring_sc_enqueue_multi_atomic(struct buf_ring_sc *br, void *ents[], int ent_count);
+void buf_ring_sc_drain(struct buf_ring_sc *br, int budget);
 
 /**
  * buf_ring_sc_peek - check ring for entries
@@ -145,36 +117,6 @@ void buf_ring_sc_advance(struct buf_ring_sc *br, int count);
  */
 void buf_ring_sc_abdicate(struct buf_ring_sc *br);
 
-/**
- * buf_ring_sc_lock - acquire consumer lock
- *
- * Used to acquire the tx lock in a context without any additional
- * new packets
- */
-void buf_ring_sc_lock(struct buf_ring_sc *br);
-
-/**
- * buf_ring_sc_trylock - attempt to acquire consumer lock
- *
- * Used to acquire the tx lock in a context without any additional
- * new packets
- */
-int buf_ring_sc_trylock(struct buf_ring_sc *br);
-
-/**
- * buf_ring_sc_unlock - release the consumer lock 
- * @reason: the reason why the lock is being dropped:
- *   - BR_UNLOCK_IDLE: there are no more packets
- *   - BR_UNLOCK_ABDICATE: there are more packets but we've
- *     used up our budget
- *   - BR_UNLOCK_STALLED: Unable to consume more packets from
- *     the ring due to some other resource limitation
- *
- * returns true if there is a pending owner - meaning that the
- * caller does not have to enqueue a task if there are still buffers
- * in the ring and we're abdicating
- */
-int buf_ring_sc_unlock(struct buf_ring_sc *br, br_unlock_reason reason);
 int buf_ring_sc_count(struct buf_ring_sc *br);
 int buf_ring_sc_empty(struct buf_ring_sc *br);
 int buf_ring_sc_full(struct buf_ring_sc *br);

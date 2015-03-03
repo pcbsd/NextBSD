@@ -38,7 +38,11 @@ __FBSDID("$FreeBSD$");
 #include <sys/buf_ring.h>
 #include <sys/buf_ring_sc.h>
 
+#define ESTALLED        254      /* consumer is stalled */
+#define EOWNED          255      /* consumer lock acquired */
+
 #define ALIGN_SCALE (CACHE_LINE_SIZE/sizeof(caddr_t))
+
 
 static struct buf_ring *
 buf_ring_alloc_(int count, struct malloc_type *type, int flags, struct mtx *lock, int brflags)
@@ -73,7 +77,7 @@ buf_ring_alloc(int count, struct malloc_type *type, int flags, struct mtx *lock)
 }
 
 struct buf_ring *
-buf_ring_alloc_aligned(int count, struct malloc_type *type, int flags, struct mtx *lock)
+buf_ring_aligned_alloc(int count, struct malloc_type *type, int flags, struct mtx *lock)
 {
 
 	return (buf_ring_alloc_(count, type, flags, lock, BR_FLAGS_ALIGNED));
@@ -127,35 +131,50 @@ typedef union prod_state_ {
 #define BR_STALLED(br) ((br)->br_cons & BR_RING_STALLED)
 #define BR_PENDING      (1<<0)
 #define BR_OWNED        (1<<1)
-#define BR_RING_OWNED   (1<<31)
 #define BR_RING_PENDING (1<<30)
+#define BR_RING_OWNED   (1<<31)
 
+typedef enum br_state_ {
+	BR_IDLE = 1,
+	BR_ABDICATED,
+	BR_BUSY,
+	BR_STALLED
+} br_state;
 
 struct buf_ring_sc {
 	volatile prod_state	br_prod_state;
 	volatile uint32_t	br_prod_tail;
-	int              	br_prod_size;
-	int              	br_prod_mask;
-	volatile void *br_pending_buf;
+	/*
+	 * The following values are not expected to be modified
+	 * while the ring is in use, so we put them on their own
+	 * cache line to avoid false sharing when they are read
+	 */
+	int              	br_size __aligned(CACHE_LINE_SIZE);
+	int              	br_mask;
+	int			br_flags;
 	counter_u64_t		br_enqueues;
 	counter_u64_t		br_drops;
 	counter_u64_t		br_starts;
 	counter_u64_t		br_restarts;
+	counter_u64_t		br_abdications;
+	counter_u64_t		br_stalls;
+	int (*br_drain) (struct buf_ring_sc *br, int avail);
+	void (*br_deferred) (struct buf_ring_sc *br);
+
 	/* cache line aligned to avoid cache line invalidate traffic
 	 * between consumer and producer (false sharing)
 	 *
 	 */
 	volatile uint32_t	br_cons __aligned(CACHE_LINE_SIZE);
-	counter_u64_t		br_abdications;
-	counter_u64_t		br_stalls;
-	int		 	br_cons_size;
-	int              	br_cons_mask;
-	int			br_flags;
 	/* cache line aligned to avoid false sharing with other data structures
 	 * located just beyond the end of the ring
 	 */
 	struct br_sc_entry_	br_ring[0] __aligned(CACHE_LINE_SIZE);
 };
+
+
+static int buf_ring_sc_trylock(struct buf_ring_sc *br);
+static int buf_ring_sc_unlock(struct buf_ring_sc *br, br_state state);
 
 /*
  * Many architectures other than x86 permit speculative re-ordering
@@ -195,17 +214,16 @@ brsc_entry_set(struct buf_ring_sc *br, int i, void *buf)
 		br->br_ring[i].bre_ptr = buf;
 }
 
-
-
 struct buf_ring_sc *
-buf_ring_sc_alloc(int count, struct malloc_type *type, int flags, int brflags)
+buf_ring_sc_alloc(int count, struct malloc_type *type, int flags,
+	struct buf_ring_sc_consumer *brsc)
 {
 	struct buf_ring_sc *br;
 	int alloc_count = count;
 
 	KASSERT(powerof2(count), ("buf ring must be size power of 2"));
 #if BR_ALIGN_ENTRIES == 0
-	if (brflags & BR_FLAGS_ALIGNED)
+	if (brsc->brsc_flags & BR_FLAGS_ALIGNED)
 		alloc_count = count*ALIGN_SCALE;
 #endif
 	br = malloc(sizeof(struct buf_ring) + alloc_count*sizeof(caddr_t),
@@ -213,9 +231,11 @@ buf_ring_sc_alloc(int count, struct malloc_type *type, int flags, int brflags)
 	if (br == NULL)
 		return (NULL);
 
-	br->br_flags = brflags;
-	br->br_prod_size = br->br_cons_size = count;
-	br->br_prod_mask = br->br_cons_mask = count-1;
+	br->br_drain = brsc->brsc_drain;
+	br->br_deferred = brsc->brsc_deferred;
+	br->br_flags = brsc->brsc_flags;
+	br->br_size = count;
+	br->br_mask = count-1;
 	br->br_prod_value = br->br_prod_tail = 0;
 	br->br_cons = 0;
 	br->br_enqueues = counter_u64_alloc(flags);
@@ -253,7 +273,6 @@ buf_ring_sc_reset_stats(struct buf_ring_sc *br)
 	counter_u64_zero(br->br_restarts);
 }
 
-
 void
 buf_ring_sc_get_stats_v0(struct buf_ring_sc *br, struct buf_ring_sc_stats_v0 *brss)
 {
@@ -264,6 +283,59 @@ buf_ring_sc_get_stats_v0(struct buf_ring_sc *br, struct buf_ring_sc_stats_v0 *br
 	brss->brs_starts = counter_u64_fetch(br->br_starts);
 	brss->brs_restarts = counter_u64_fetch(br->br_restarts);
 }
+
+static br_state
+buf_ring_sc_drain_locked(struct buf_ring_sc *br, int budget)
+{
+	uint32_t cidx = br->br_cons;
+	uint32_t pidx = br->br_prod_tail;
+	uint32_t n;
+	int avail;
+	br_state state;
+
+	KASSERT(budget > 0, ("calling drain with invalid budget"));
+	state = BR_IDLE;
+	while (cidx != pidx) {
+		if ((avail = pidx - cidx) < 0)
+			avail += br->br_size;
+		if (avail > budget)
+			avail = budget;
+		n = br->br_drain(br, avail);
+		KASSERT(n <= avail, ("drain handler return invalid count"));
+		if (n == 0) {
+			state = BR_STALLED;
+			break;
+		}
+
+		buf_ring_sc_advance(br, n);
+		budget -= n;
+		if (budget == 0) {
+			if (br->br_cons != br->br_prod_tail)
+				state = BR_ABDICATED;
+			break;
+		}
+		pidx = br->br_prod_tail;
+		cidx = br->br_cons;
+	}
+
+	return (state);
+}
+
+void
+buf_ring_sc_drain(struct buf_ring_sc *br, int budget)
+{
+	br_state state;
+	int pending;
+
+	KASSERT(budget > 0, ("calling drain with invalid budget"));
+	if (!buf_ring_sc_trylock(br))
+		return;
+	state = buf_ring_sc_drain_locked(br, budget);
+	pending = buf_ring_sc_unlock(br, state);
+	if ((state == BR_ABDICATED) && pending == 0)
+		br->br_deferred(br);
+}
+
 /*
  * Multi-producer safe lock-free ring buffer enqueue
  *
@@ -319,7 +391,7 @@ buf_ring_sc_get_stats_v0(struct buf_ring_sc *br, struct buf_ring_sc_stats_v0 *br
  *   the producer can not produce faster than the consumer. Hence the
  *   check of 'prod_head' + 1 against 'cons'.
  *
- * - The use of "prod_next = (prod_head + 1) & br->br_prod_mask" to
+ * - The use of "prod_next = (prod_head + 1) & br->br_mask" to
  *   calculate the next index is slightly cheaper than a modulo but
  *   requires the ring to be power-of-2 sized.
  *
@@ -353,37 +425,56 @@ buf_ring_sc_get_stats_v0(struct buf_ring_sc *br, struct buf_ring_sc_stats_v0 *br
  *      How do we handle abdication when the ring is full
  */
 int
-buf_ring_sc_enqueue(struct buf_ring_sc *br, void *buf)
+buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int budget)
 {
 	uint32_t prod_head, prod_next, cons, value;
 	uint32_t pidx, cidx;
-	int pending, rc;
+	int pending, rc, avail;
 	prod_state state;
 #ifdef DEBUG_BUFRING
-	int i;
+	int i, j;
 	for (i = br->br_cons; i != ORDERED_LOAD_32(&br->br_prod_tail);
-	     i = ((i + 1) & br->br_cons_mask))
-		if(brsc_entry_get(br, i) == buf)
-			panic("buf=%p already enqueue at %d prod=%d cons=%d",
-			    buf, i, br->br_prod_tail, br->br_cons);
+	     i = ((i + 1) & br->br_mask))
+		for (j = 0; j < count; j++)
+			if (brsc_entry_get(br, i) == ents[j])
+				panic("buf=%p already enqueue at %d prod=%d cons=%d",
+					  ents[j], i, br->br_prod_tail, br->br_cons);
 #endif
 	critical_enter();
 
 	state = br->br_prod_state;
 	pending = false;
 	rc = 0;
+
 	/*
 	 * If the current consumer abdicated we loop until the pending bit is
 	 * set and if we set it we're the next lock holder - or if the owner
 	 * drops the lock before we can do that then the lock will be
 	 * re-acquired normally
 	 */
-	while (BR_HANDOFF(br) && state.ps_flags == BR_OWNED) {
+	while (BR_HANDOFF(br) && state.ps_flags == BR_OWNED && budget > 0) {
+		prod_head = br->br_prod_head;
+		pidx = BR_INDEX(prod_head);
+		cons = br->br_cons;
+		cidx = BR_INDEX(cons);
+		if ((avail = pidx - cidx) < 0)
+			avail += br->br_size;
+
+		if (count > avail) {
+			if (pidx != BR_INDEX(atomic_load_acq_32(&br->br_prod_value)) ||
+			    cidx != BR_INDEX(atomic_load_acq_32(&br->br_cons)))
+				continue;
+			critical_exit();
+			counter_u64_add(br->br_drops, 1);
+			return (ENOBUFS);
+		}
 		value = state.ps_value;
+		pidx = (pidx + count) & br->br_mask;
 		state.ps_flags |= BR_PENDING;
+		state.ps_head = pidx;
 		if (atomic_cmpset_acq_32(&br->br_prod_value, value, state.ps_value)) {
 			pending = true;
-			break;
+			goto done;
 		}
 		state = br->br_prod_state;
 	}
@@ -393,74 +484,33 @@ buf_ring_sc_enqueue(struct buf_ring_sc *br, void *buf)
 		pidx = BR_INDEX(prod_head);
 		cons = br->br_cons;
 		cidx = BR_INDEX(cons);
-		prod_next = (pidx + 1) & br->br_prod_mask;
+		if ((avail = pidx - cidx) < 0)
+			avail += br->br_size;
 
-
-		if (prod_next == cidx) {
+		if (count > avail) {
 			/* ensure that we only return ENOBUFS
 			 * if the latest value matches what we read
 			 */
 			if (pidx != BR_INDEX(atomic_load_acq_32(&br->br_prod_value)) ||
 			    cidx != BR_INDEX(atomic_load_acq_32(&br->br_cons)))
 				continue;
-
-			if (pending) {
-				/* no space in ring - but we're the next owner
-				 * acquire the lock and insert it as the pending buf
-				 */
-				while ((br->br_prod_flags & BR_OWNED) == BR_OWNED)
-					cpu_spinwait();
-				atomic_set_acq_32(&br->br_prod_value, BR_RING_OWNED);
-				br->br_cons &= ~(BR_RING_ABDICATING|BR_RING_IDLE);
-				atomic_clear_rel_32(&br->br_prod_value, BR_RING_PENDING);
-				br->br_pending_buf = buf;
-				counter_u64_add(br->br_enqueues, 1);
-				return (EOWNED);
-			}
-
 			critical_exit();
 			counter_u64_add(br->br_drops, 1);
 			return (ENOBUFS);
 		}
+		prod_next = (pidx + count) & br->br_mask;
 
-		if (BR_STALLED(br))
-			rc = ESTALLED;
-		else if (pending) {
-			prod_next |= BR_RING_OWNED|BR_RING_PENDING;
-			rc = EOWNED;
-		} else if (state.ps_flags == 0) {
+
+		if (state.ps_flags == 0 && budget > 0) {
 			prod_next |= BR_RING_OWNED;
 			rc = EOWNED;
 		} else
 			prod_next |= (state.ps_value & BR_RING_FLAGS_MASK);
 
-		/*
-		 * no point in doing the CAS until it might succeed
-		 */
-		if (pending)
-			while ((br->br_prod_flags & BR_OWNED) == BR_OWNED)
-				cpu_spinwait();
-
-		/*
-		 * If there is no owner we need to loop until there is an owner
-		 * and return true if we're the one to set it
-		 */
-
 	} while (!atomic_cmpset_acq_32(&br->br_prod_value, prod_head, prod_next));
-	if (rc == EOWNED)
-		br->br_cons &= BR_RING_MASK;
-    /*
-	 * we became owner by way of the contested abdicate clear pending
-	 */
-	if (pending)
-		atomic_clear_rel_32(&br->br_prod_value, BR_RING_PENDING);
-
-#ifdef DEBUG_BUFRING
-	if (brsc_entry_get(br, prod_head) != NULL)
-		panic("dangling value in enqueue");
-#endif
-	brsc_entry_set(br, prod_head, buf);
-
+	done:
+	for (i = 0; i < count; i++)
+		brsc_entry_set(br, (prod_head-(count-1))+i, ents[i]);
 	/*
 	 * If there are other enqueues in progress
 	 * that preceded us, we need to wait for them
@@ -474,28 +524,55 @@ buf_ring_sc_enqueue(struct buf_ring_sc *br, void *buf)
 	 */
 	atomic_store_rel_32(&br->br_prod_tail, prod_next);
 
+	/* now that we've completed the enqueue if we know that we're
+	 * the next owner we need to wait for the current owner to clear
+	 * the owned bit
+	 */
+	if (pending) {
+		while ((br->br_prod_flags & BR_OWNED) == BR_OWNED)
+			cpu_spinwait();
+		atomic_set_acq_32(&br->br_prod_value, BR_RING_OWNED);
+		rc = EOWNED;
+	}
+	if (rc == EOWNED)
+		br->br_cons &= BR_RING_FLAGS_MASK;
+    /*
+	 * we became owner by way of the contested abdicate clear pending
+	 */
+	if (pending)
+		atomic_clear_rel_32(&br->br_prod_value, BR_RING_PENDING);
+
 	critical_exit();
 	counter_u64_add(br->br_enqueues, 1);
-	return (rc);
+
+	/* we're the owner - our buffers were enqueued */
+	if (rc == EOWNED) {
+		br_state state = buf_ring_sc_drain_locked(br, budget);
+		if (buf_ring_sc_unlock(br, state) == 0 && state == BR_ABDICATED)
+			br->br_deferred(br); /* consumer's re-drive mechanism */
+	}
+#if 0
+	else if (BR_STALLED(br)) {
+		/* buffer enqueued - but we can't do any work */
+		return (ESTALLED);
+	}
+#endif
+	return (0);
 }
 
 /*
  * populate ents with up to count values from the ring
  * and return the number of entries
- */int
+ */
+int
 buf_ring_sc_peek(struct buf_ring_sc *br, void *ents[], uint16_t count)
 {
 	uint32_t cons;
 	uint32_t prod_tail;
-	int avail;
-	int cidx, i = 0;
+	int i, avail;
 
 	KASSERT(count > 0, ("peeking for zero entries"));
 	KASSERT(br->br_prod_flags == BR_OWNED, ("peeking without lock being held"));
-	if (__predict_false(br->br_pending_buf != NULL)) {
-		ents[0] = (void *)br->br_pending_buf;
-		i = 1;
-	}
 	/*
 	 * for correctness prod_tail must be read before ring[cons]
 	 */
@@ -504,13 +581,13 @@ buf_ring_sc_peek(struct buf_ring_sc *br, void *ents[], uint16_t count)
 	avail = prod_tail - cons;
 
 	if (avail == 0)
-		return (i);
+		return (0);
 	if (avail < 0)
-		avail += br->br_prod_size;
+		avail += br->br_size;
 	if (avail > count)
 		avail = count;
-	for (cidx = 0; i < avail; i++, cidx++)
-		ents[i] = brsc_entry_get(br, (cons + cidx) & br->br_cons_mask);
+	for (i = 0; i < avail; i++)
+		ents[i] = brsc_entry_get(br, (cons + i) & br->br_mask);
 
 	return (avail);
 }
@@ -537,10 +614,7 @@ buf_ring_sc_putback(struct buf_ring_sc *br, void *new, int idx)
 {
 	KASSERT(br->br_cons != br->br_prod_tail,
 			("Buf-Ring has none in putback")) ;
-	if (idx == 0 & br->br_pending_buf != NULL)
-		br->br_pending_buf = new;
-	else
-		brsc_entry_set(br, br->br_cons + idx, new);
+	brsc_entry_set(br, br->br_cons + idx, new);
 }
 
 /*
@@ -556,13 +630,10 @@ buf_ring_sc_advance(struct buf_ring_sc *br, int count)
 
 	advance_count = count;
 	KASSERT(count > 0, ("invalid advance count"));
-	if (__predict_false(br->br_pending_buf != NULL)) {
-		br->br_pending_buf = NULL;
-		advance_count--;
-	}
+
 	cons = br->br_cons;
 	prod_tail = br->br_prod_tail;
-	cons_next = (cons + advance_count) & br->br_cons_mask;
+	cons_next = (cons + advance_count) & br->br_mask;
 
 	/*
 	 * Storing NULL here serves two purposes:
@@ -573,7 +644,7 @@ buf_ring_sc_advance(struct buf_ring_sc *br, int count)
 	 *    update with an atomic_store_rel_32
 	 */
 	for (i = 0; i < advance_count; i++)
-		brsc_entry_set(br, (cons + i) & br->br_cons_mask, NULL);
+		brsc_entry_set(br, (cons + i) & br->br_mask, NULL);
 
 	atomic_store_rel_32(&br->br_cons, cons_next);
 }
@@ -600,8 +671,8 @@ buf_ring_sc_count(struct buf_ring_sc *br)
 	 * understands that this is only a point in time snapshot
 	 */
 
-	return ((br->br_prod_size + br->br_prod_tail - BR_INDEX(br->br_cons))
-	    & br->br_prod_mask);
+	return ((br->br_size + br->br_prod_tail - BR_INDEX(br->br_cons))
+	    & br->br_mask);
 }
 
 int
@@ -620,15 +691,14 @@ buf_ring_sc_full(struct buf_ring_sc *br)
 	/* br_cons may be stale but the caller understands that this is
 	* only a point in time snapshot
 	*/
-	return (((br->br_prod_tail + 1) & br->br_prod_mask) == BR_INDEX(br->br_cons));
+	return (((br->br_prod_tail + 1) & br->br_mask) == BR_INDEX(br->br_cons));
 }
 
+#if 0
 /*
- * Note that this will block until the current consumer stalls
- * or goes idle without any intervening consumers - thus is only
- * recommend when flushing the ring
+ * Not currently being used - but leave here for now
  */
-void
+static void
 buf_ring_sc_lock(struct buf_ring_sc *br)
 {
 	uint32_t value, new_value;
@@ -650,8 +720,9 @@ buf_ring_sc_lock(struct buf_ring_sc *br)
 	br->br_cons &= ~(BR_RING_IDLE|BR_RING_ABDICATING|BR_RING_STALLED);
 	atomic_clear_rel_32(&br->br_prod_value, BR_RING_PENDING);
 }
+#endif
 
-int
+static int
 buf_ring_sc_trylock(struct buf_ring_sc *br)
 {
 	uint32_t value, new_value;
@@ -670,8 +741,8 @@ buf_ring_sc_trylock(struct buf_ring_sc *br)
 	return (1);
 }
 
-int
-buf_ring_sc_unlock(struct buf_ring_sc *br, br_unlock_reason reason)
+static int
+buf_ring_sc_unlock(struct buf_ring_sc *br, br_state reason)
 {
 	prod_state state;
 	uint32_t prod_value, cons_next;
@@ -683,22 +754,23 @@ buf_ring_sc_unlock(struct buf_ring_sc *br, br_unlock_reason reason)
 	 * with enqueue - they only differ for purposes of stats
 	 * keeping
 	 */
-	if (reason == BR_UNLOCK_IDLE) {
+	if (reason == BR_IDLE) {
 		cons_next = br->br_cons | BR_RING_IDLE;
 		critical_enter();
 		atomic_store_rel_32(&br->br_cons, cons_next);
-	} else if ((reason == BR_UNLOCK_ABDICATE) &&
+	} else if ((reason == BR_ABDICATED) &&
 			   (br->br_cons & BR_RING_ABDICATING) == 0) {
 		cons_next = br->br_cons | BR_RING_ABDICATING;
 		counter_u64_add(br->br_abdications, 1);
 		critical_enter();
 		atomic_store_rel_32(&br->br_cons, cons_next);
-	} else if (reason == BR_UNLOCK_STALLED) {
+	} else if (reason == BR_STALLED) {
 		cons_next = br->br_cons | BR_RING_STALLED;
 		counter_u64_add(br->br_stalls, 1);
 		critical_enter();
 		atomic_store_rel_32(&br->br_cons, cons_next);
-	}
+	} else
+		panic("invalid unlock state");
 	do {
 		prod_value = state.ps_value = br->br_prod_value;
 		pending = !!(state.ps_flags & BR_PENDING);
