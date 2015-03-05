@@ -43,8 +43,9 @@ struct buf_ring_sc_stats_v0 {
 };
 
 struct buf_ring_sc_consumer {
-	int (*brsc_drain) (struct buf_ring_sc *br, int avail);
-	void (*brsc_deferred) (struct buf_ring_sc *br);
+	int (*brsc_drain) (struct buf_ring_sc *br, int avail, void *sc);
+	void (*brsc_deferred) (struct buf_ring_sc *br, void *sc);
+	void *brsc_sc;
 	int brsc_flags;
 
 };
@@ -71,7 +72,8 @@ int buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int bud
 
 /**
  * buf_ring_sc_drain - check ring for entries and drain
- * @budget: max entries to drain
+ * @budget: if non-zero max entries to drain
+ * if zero does a blocking acquisition
  *
  */
 void buf_ring_sc_drain(struct buf_ring_sc *br, int budget);
@@ -85,6 +87,7 @@ void buf_ring_sc_drain(struct buf_ring_sc *br, int budget);
  *
  * populate ents with up to count entries from the ring
  * returns the number of entries in ents
+ * To be used only by the user specified drain function.
  */
 int buf_ring_sc_peek(struct buf_ring_sc *br, void *ents[], uint16_t count);
 
@@ -97,13 +100,9 @@ int buf_ring_sc_peek(struct buf_ring_sc *br, void *ents[], uint16_t count);
  * to the top of the ring at offset idx from the current
  * consumer index. The caller should *not* have advanced 
  * the index.
+ * To be used only by the user specified drain function.
  */
 void buf_ring_sc_putback(struct buf_ring_sc *br, void *new, int idx);
-
-/*
- * Advance the ring's consumer index by count
- */
-void buf_ring_sc_advance(struct buf_ring_sc *br, int count);
 
 /**
  * buf_ring_sc_abdicate - indicate unlock intent
@@ -113,7 +112,8 @@ void buf_ring_sc_advance(struct buf_ring_sc *br, int count);
  * for calling buf_ring_sc_unlock subsequently with no
  * intervening blocking operations
  * This function is an *optional* optimization to give a
- * wider window for handoff to the next consumer. 
+ * wider window for handoff to the next consumer.
+  * To be used only by the user specified drain function.
  */
 void buf_ring_sc_abdicate(struct buf_ring_sc *br);
 

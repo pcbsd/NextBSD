@@ -158,9 +158,9 @@ struct buf_ring_sc {
 	counter_u64_t		br_restarts;
 	counter_u64_t		br_abdications;
 	counter_u64_t		br_stalls;
-	int (*br_drain) (struct buf_ring_sc *br, int avail);
-	void (*br_deferred) (struct buf_ring_sc *br);
-
+	int (*br_drain) (struct buf_ring_sc *br, int avail, void *sc);
+	void (*br_deferred) (struct buf_ring_sc *br, void *sc);
+	void *br_sc;
 	/* cache line aligned to avoid cache line invalidate traffic
 	 * between consumer and producer (false sharing)
 	 *
@@ -172,9 +172,11 @@ struct buf_ring_sc {
 	struct br_sc_entry_	br_ring[0] __aligned(CACHE_LINE_SIZE);
 };
 
-
+static void buf_ring_sc_lock(struct buf_ring_sc *br);
 static int buf_ring_sc_trylock(struct buf_ring_sc *br);
 static int buf_ring_sc_unlock(struct buf_ring_sc *br, br_state state);
+
+static void buf_ring_sc_advance(struct buf_ring_sc *br, int count);
 
 /*
  * Many architectures other than x86 permit speculative re-ordering
@@ -234,6 +236,7 @@ buf_ring_sc_alloc(int count, struct malloc_type *type, int flags,
 	br->br_drain = brsc->brsc_drain;
 	br->br_deferred = brsc->brsc_deferred;
 	br->br_flags = brsc->brsc_flags;
+	br->br_sc = brsc->brsc_sc;
 	br->br_size = count;
 	br->br_mask = count-1;
 	br->br_prod_value = br->br_prod_tail = 0;
@@ -300,7 +303,7 @@ buf_ring_sc_drain_locked(struct buf_ring_sc *br, int budget)
 			avail += br->br_size;
 		if (avail > budget)
 			avail = budget;
-		n = br->br_drain(br, avail);
+		n = br->br_drain(br, avail, br->br_sc);
 		KASSERT(n <= avail, ("drain handler return invalid count"));
 		if (n == 0) {
 			state = BR_STALLED;
@@ -327,13 +330,14 @@ buf_ring_sc_drain(struct buf_ring_sc *br, int budget)
 	br_state state;
 	int pending;
 
-	KASSERT(budget > 0, ("calling drain with invalid budget"));
-	if (!buf_ring_sc_trylock(br))
+	if (__predict_false(budget == 0))
+		buf_ring_sc_lock(br);
+	else if (!buf_ring_sc_trylock(br))
 		return;
 	state = buf_ring_sc_drain_locked(br, budget);
 	pending = buf_ring_sc_unlock(br, state);
 	if ((state == BR_ABDICATED) && pending == 0)
-		br->br_deferred(br);
+		br->br_deferred(br, br->br_sc);
 }
 
 /*
@@ -549,7 +553,7 @@ buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int budget)
 	if (rc == EOWNED) {
 		br_state state = buf_ring_sc_drain_locked(br, budget);
 		if (buf_ring_sc_unlock(br, state) == 0 && state == BR_ABDICATED)
-			br->br_deferred(br); /* consumer's re-drive mechanism */
+			br->br_deferred(br, br->br_sc); /* consumer's re-drive mechanism */
 	}
 #if 0
 	else if (BR_STALLED(br)) {
@@ -621,7 +625,7 @@ buf_ring_sc_putback(struct buf_ring_sc *br, void *new, int idx)
  * @count: the number of entries by which to advance the consumer index
  *
  */
-void
+static void
 buf_ring_sc_advance(struct buf_ring_sc *br, int count)
 {
 	uint32_t cons, cons_next;
@@ -694,7 +698,6 @@ buf_ring_sc_full(struct buf_ring_sc *br)
 	return (((br->br_prod_tail + 1) & br->br_mask) == BR_INDEX(br->br_cons));
 }
 
-#if 0
 /*
  * Not currently being used - but leave here for now
  */
@@ -720,7 +723,7 @@ buf_ring_sc_lock(struct buf_ring_sc *br)
 	br->br_cons &= ~(BR_RING_IDLE|BR_RING_ABDICATING|BR_RING_STALLED);
 	atomic_clear_rel_32(&br->br_prod_value, BR_RING_PENDING);
 }
-#endif
+
 
 static int
 buf_ring_sc_trylock(struct buf_ring_sc *br)
