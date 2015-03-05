@@ -28,6 +28,7 @@
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/bus.h>
+#include <sys/buf_ring_sc.h>
 #include <sys/eventhandler.h>
 #include <sys/sockio.h>
 #include <sys/kernel.h>
@@ -87,6 +88,7 @@
  *    look at handling tx ack processing
  *
  */
+MALLOC_DEFINE(M_IFLIB, "iflib", "ifnet library");
 
 struct iflib_txq;
 typedef struct iflib_txq *iflib_txq_t;
@@ -169,7 +171,11 @@ typedef struct iflib_sw_desc {
 #define IFLIB_QUEUE_HUNG		1
 #define IFLIB_QUEUE_WORKING	2
 
-#define IFLIB_LEGACY 1
+#define IFLIB_BUDGET 64
+#define IFLIB_RESTART_BUDGET 8
+
+#define IFC_LEGACY 0x1
+#define IFC_QFLUSH 0x2
 
 struct iflib_txq {
 	iflib_ctx_t	ift_ctx;
@@ -199,7 +205,7 @@ struct iflib_txq {
 	int                     ift_id;
 	iflib_sd_t              ift_sds;
 	int                     ift_nbr;
-	struct buf_ring        **ift_br;
+	struct buf_ring_sc        **ift_br;
 	struct grouptask		ift_task;
 	int			            ift_qstatus;
 	int                     ift_active;
@@ -268,20 +274,6 @@ struct iflib_rxq {
 
 #define SCTX_LOCK(sctx) CTX_LOCK((sctx)->isc_ctx)
 #define SCTX_UNLOCK(sctx) CTX_UNLOCK((sctx)->isc_ctx)
-
-
-#define TXQ_LOCK(txq) mtx_lock(&(txq)->ift_mtx)
-#define TXQ_LOCK_HELD(txq) mtx_held(&(txq)->ift_mtx)
-#define TXQ_LOCK_ASSERT(txq) mtx_assert(&(txq)->ift_mtx, MA_OWNED)
-#define TXQ_TRYLOCK(txq) mtx_trylock(&(txq)->ift_mtx)
-#define TXQ_UNLOCK(txq) mtx_unlock(&(txq)->ift_mtx)
-#define TXQ_LOCK_DESTROY(txq) mtx_destroy(&(txq)->ift_mtx)
-
-#define RXQ_LOCK(rxq) mtx_lock(&(rxq)->ifr_mtx)
-#define RXQ_LOCK_ASSERT(rxq) mtx_assert(&(rxq)->ifr_mtx), MA_OWNED)
-#define RXQ_TRYLOCK(rxq) mtx_trylock(&(rxq)->ifr_mtx)
-#define RXQ_UNLOCK(rxq) mtx_unlock(&(rxq)->ifr_mtx)
-#define RXQ_LOCK_DESTROY(rxq) mtx_destroy(&(rxq)->ifr_mtx)
 
 static int iflib_recycle_enable;
 
@@ -553,7 +545,6 @@ iflib_txq_destroy(iflib_txq_t txq)
 		bus_dma_tag_destroy(txq->ift_desc_tag);
 		txq->ift_desc_tag = NULL;
 	}
-	TXQ_LOCK_DESTROY(txq);
 }
 
 static void
@@ -584,7 +575,6 @@ iflib_txq_setup(iflib_txq_t txq)
 	struct netmap_adapter *na = netmap_getna(sctx->isc_ifp);
 #endif /* DEV_NETMAP */
 
-	TXQ_LOCK(txq);
 #ifdef DEV_NETMAP
 	slot = netmap_reset(na, NR_TX, txq->ift_id, 0);
 #endif /* DEV_NETMAP */
@@ -623,7 +613,6 @@ iflib_txq_setup(iflib_txq_t txq)
 	for (i = 0, di = qset->ifq_ifdi; i < qset->ifq_nhwqs; i++, di++)
 		bus_dmamap_sync(di->idi_tag, di->idi_map,
 						BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
-	TXQ_UNLOCK(txq);
 	return (0);
 }
 
@@ -899,6 +888,7 @@ iflib_timer(void *arg)
 	iflib_txq_t txq = arg;
 	iflib_ctx_t ctx = txq->ift_ctx;
 	if_shared_ctx_t sctx = ctx->ifc_sctx;
+	if_t ifp = sctx->isc_ifp;
 
 	/*
 	** Check on the state of the TX queue(s), this
@@ -925,6 +915,15 @@ hung:
 	IFDI_WATCHDOG_RESET(sctx);
 	sctx->isc_watchdog_events++;
 	sctx->isc_pause_frames = 0;
+
+	/* Set hardware offload abilities */
+	if_clearhwassist(ifp);
+	if (if_getcapenable(ifp) & IFCAP_TXCSUM)
+		if_sethwassistbits(ifp, CSUM_TCP | CSUM_UDP, 0);
+	if (if_getcapenable(ifp) & IFCAP_TSO4)
+		if_sethwassistbits(ifp, CSUM_TSO, 0);
+	if (if_getcapenable(ifp) & IFCAP_TXCSUM_IPV6)
+		if_sethwassistbits(ifp,  (CSUM_TCP_IPV6 | CSUM_UDP_IPV6), 0);
 
 	IFDI_INIT(sctx);
 	CTX_UNLOCK(ctx);
@@ -984,12 +983,8 @@ iflib_stop(iflib_ctx_t ctx)
 	if_setdrvflagbits(sctx->isc_ifp, IFF_DRV_OACTIVE, IFF_DRV_RUNNING);
 
 	/* Wait for curren tx queue users to exit to disarm watchdog timer. */
-	for (int i = 0; i < sctx->isc_nqsets; i++, txq++) {
-		TXQ_LOCK(txq);
-		txq->ift_qstatus = IFLIB_QUEUE_IDLE;
-		callout_stop(&txq->ift_timer);
-		TXQ_UNLOCK(txq);
-	}
+	for (int i = 0; i < sctx->isc_nqsets; i++, txq++)
+		buf_ring_sc_drain(txq->ift_br[0], 0);
 	IFDI_STOP(sctx);
 }
 
@@ -1154,11 +1149,8 @@ iflib_rxeof(iflib_rxq_t rxq, int budget)
 			GROUPTASK_ENQUEUE(&txq->ift_task);
 	}
 
-	if (!RXQ_TRYLOCK(rxq))
-		return (false);
 #ifdef DEV_NETMAP
 	if (netmap_rx_irq(ifp, rxq->ifr_id, &processed)) {
-		RXQ_UNLOCK(rxq);
 		return (FALSE);
 	}
 #endif /* DEV_NETMAP */
@@ -1232,7 +1224,6 @@ iflib_rxeof(iflib_rxq_t rxq, int budget)
 		}
 	}
 	rxq->ifr_cidx = cidx;
-	RXQ_UNLOCK(rxq);
 
 	while (mh != NULL) {
 		m = mh;
@@ -1385,30 +1376,6 @@ retry:
 #define RECLAIM_THRESH(ctx) ((ctx)->ifc_sctx->isc_tx_reclaim_thresh)
 #define MAX_TX_DESC(ctx) ((ctx)->ifc_sctx->isc_tx_nsegments)
 
-
-static inline int
-iflib_enqueue_pkt(if_t ifp, iflib_txq_t txq, struct mbuf *m)
-{
-	int bridx = 0;
-
-	if (M_HASHTYPE_GET(m))
-		bridx = BRIDX(txq, m);
-
-	return (drbr_enqueue(ifp, txq->ift_br[bridx], m));
-}
-
-static inline int
-iflib_txq_softq_empty(if_t ifp, iflib_txq_t txq)
-{
-	int i;
-
-	for (i = 0; i < txq->ift_nbr; i++)
-		if (drbr_peek(ifp, txq->ift_br[i]) != NULL)
-			return (FALSE);
-
-	return (TRUE);
-}
-
 static void
 iflib_tx_desc_free(iflib_txq_t txq, int n)
 {
@@ -1416,7 +1383,6 @@ iflib_tx_desc_free(iflib_txq_t txq, int n)
 	uint32_t qsize, cidx, mask;
 	struct mbuf *m;
 
-	TXQ_LOCK_ASSERT(txq);
 	cidx = txq->ift_cidx;
 	qsize = txq->ift_ctx->ifc_sctx->isc_ntxd;
 	mask = qsize-1;
@@ -1454,7 +1420,6 @@ iflib_completed_tx_reclaim(iflib_txq_t txq, int thresh)
 	if_shared_ctx_t sctx = txq->ift_ctx->ifc_sctx;
 
 	KASSERT(thresh >= 0, ("invalid threshold to reclaim"));
-	TXQ_LOCK_ASSERT(txq);
 
 	reclaim = DESC_RECLAIMABLE(txq);
 	/*
@@ -1486,91 +1451,62 @@ iflib_tx_timeout(void *arg)
 	/* XXX */
 }
 
-static int
-iflib_txq_start(iflib_txq_t txq)
+static void
+iflib_txq_deferred(struct buf_ring_sc *br __unused, void *sc)
 {
-	iflib_ctx_t ctx = txq->ift_ctx;
-	if_t ifp = ctx->ifc_sctx->isc_ifp;
-	struct mbuf *next;
-	int err, bridx, resid, enq;
+	iflib_txq_t txq = sc;
 
-	err = enq = 0;
-	do {
-		resid = FALSE;
-		for (bridx = 0; bridx < txq->ift_nbr; bridx++) {
-			if ((next = drbr_peek(ifp, txq->ift_br[bridx])) == NULL)
-				continue;
-			if (!(ifp->if_drv_flags & IFF_DRV_RUNNING) ||
-				!LINK_ACTIVE(ctx))
-				goto done;
-			resid = TRUE;
-			iflib_completed_tx_reclaim(txq, RECLAIM_THRESH(ctx));
-			if (TXQ_AVAIL(txq) < MAX_TX_DESC(ctx))
-				break;
-			if ((err = iflib_encap(txq, &next)) != 0) {
-				if (next == NULL)
-					drbr_advance(ifp, txq->ift_br[bridx]);
-				else
-					drbr_putback(ifp, txq->ift_br[bridx], next);
-				goto done;
-			}
-			drbr_advance(ifp, txq->ift_br[bridx]);
-			enq++;
-
-			if_inc_counter(ifp, IFCOUNTER_OBYTES, next->m_pkthdr.len);
-			if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
-			if (next->m_flags & M_MCAST)
-				if_inc_counter(ifp, IFCOUNTER_OMCASTS, 1);
-			if_etherbpfmtap(ifp, next);
-		}
-	} while (resid);
-
-	done:
-	if (enq > 0) {
-		/* Set the watchdog */
-		txq->ift_qstatus = IFLIB_QUEUE_WORKING;
-		txq->ift_watchdog_time = ticks;
-	}
-	if (txq->ift_db_pending)
-		iflib_txd_db_check(ctx, txq, 1);
-	if (!iflib_txq_softq_empty(ifp, txq) && LINK_ACTIVE(ctx))
-		callout_reset_on(&txq->ift_timer, 1, iflib_tx_timeout, txq,
-						 txq->ift_timer.c_cpu);
-	/*
-	 * XXX we should allot ourselves a budget and return non-zero
-	 * if it is exceeded
-	 */
-	return (0);
+	GROUPTASK_ENQUEUE(&txq->ift_task);
 }
 
 static int
-iflib_txq_transmit(if_t ifp, iflib_txq_t txq, struct mbuf *m)
+iflib_txq_drain(struct buf_ring_sc *br, int avail, void *sc)
 {
+	iflib_txq_t txq = sc;
 	iflib_ctx_t ctx = txq->ift_ctx;
-	int             avail, err = 0;
+	if_t ifp = ctx->ifc_sctx->isc_ifp;
+	struct mbuf *mp[16];
+	int i, count, sent;
 
-	avail = txq->ift_size - txq->ift_in_use;
-	TXQ_LOCK_ASSERT(txq);
+	if (ctx->ifc_flags & IFC_QFLUSH) {
+		while ((count = buf_ring_sc_peek(br, (void **)mp, 16)) > 0)
+			for (i = 0; i < count; i++)
+				m_freem(mp[i]);
+		return (0);
+	}
+	if (if_getdrvflags(ctx->ifc_sctx->isc_ifp) & IFF_DRV_OACTIVE) {
+		txq->ift_qstatus = IFLIB_QUEUE_IDLE;
+		callout_stop(&txq->ift_timer);
+		return (0);
+	}
+	sent = 0;
+	while (avail) {
+		count = buf_ring_sc_peek(br, (void **)mp, MIN(avail, 16));
+		for (i = 0; i < count; i++) {
+			iflib_completed_tx_reclaim(txq, RECLAIM_THRESH(ctx));
+			if (!(if_getdrvflags(ifp) & IFF_DRV_RUNNING) ||
+				!LINK_ACTIVE(ctx))
+				goto done;
 
-	if (iflib_txq_softq_empty(ifp, txq) && avail >= MAX_TX_DESC(ctx)) {
-		if (iflib_encap(txq, &m)) {
-			if (m != NULL && (err = iflib_txq_transmit(ifp, txq, m)) != 0)
-				return (err);
-		} else {
-			if (txq->ift_db_pending)
-				iflib_txd_db_check(ctx, txq, 1);
-			txq->ift_tx_direct_packets++;
-			txq->ift_tx_direct_bytes += m->m_pkthdr.len;
+			if(iflib_encap(sc, &mp[i])) {
+				buf_ring_sc_putback(br, mp[i], i);
+				goto done;
+			}
+			sent++;
+			if_inc_counter(ifp, IFCOUNTER_OBYTES, mp[i]->m_pkthdr.len);
+			if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
+			if (mp[i]->m_flags & M_MCAST)
+				if_inc_counter(ifp, IFCOUNTER_OMCASTS, 1);
+			if_etherbpfmtap(ifp, mp[i]);
+
 		}
-	} else if ((err = iflib_enqueue_pkt(ifp, txq, m)) != 0)
-		return (err);
+		avail -= count;
+	}
+done:
+	if (txq->ift_db_pending)
+		iflib_txd_db_check(ctx, txq, 1);
 
-	iflib_completed_tx_reclaim(txq, RECLAIM_THRESH(ctx));
-
-	if (!iflib_txq_softq_empty(ifp, txq) && LINK_ACTIVE(ctx))
-		iflib_txq_start(txq);
-
-	return (0);
+	return (sent);
 }
 
 static void
@@ -1578,17 +1514,11 @@ _task_fn_tx(void *context, int pending)
 {
 	iflib_txq_t txq = context;
 	if_shared_ctx_t sctx = txq->ift_ctx->ifc_sctx;
-	int more = 0;
 
 	if (!(if_getdrvflags(sctx->isc_ifp) & IFF_DRV_RUNNING))
 		return;
 
-	if (TXQ_TRYLOCK(txq)) {
-		more = iflib_txq_start(txq);
-		TXQ_UNLOCK(txq);
-	}
-	if (more)
-		GROUPTASK_ENQUEUE(&txq->ift_task);
+	buf_ring_sc_drain(txq->ift_br[0], IFLIB_BUDGET);
 }
 
 static void
@@ -1602,14 +1532,11 @@ _task_fn_rx(void *context, int pending)
 	if (!(if_getdrvflags(sctx->isc_ifp) & IFF_DRV_RUNNING))
 		return;
 
-	if (RXQ_TRYLOCK(rxq)) {
-		if ((more = iflib_rxeof(rxq, 8 /* XXX */)) == 0) {
-			if (ctx->ifc_flags & IFLIB_LEGACY)
-				IFDI_INTR_ENABLE(sctx);
-			else
-				IFDI_RX_INTR_ENABLE(sctx, rxq->ifr_id);
-		}
-		RXQ_UNLOCK(rxq);
+	if ((more = iflib_rxeof(rxq, 8 /* XXX */)) == 0) {
+		if (ctx->ifc_flags & IFC_LEGACY)
+			IFDI_INTR_ENABLE(sctx);
+		else
+			IFDI_RX_INTR_ENABLE(sctx, rxq->ifr_id);
 	}
 	if (more)
 		GROUPTASK_ENQUEUE(&rxq->ifr_task);
@@ -1638,12 +1565,8 @@ _task_fn_link(void *context, int pending)
 	if (LINK_ACTIVE(ctx) == 0)
 		return;
 
-	for (i = 0; i < sctx->isc_nqsets; i++, txq++) {
-		if (TXQ_TRYLOCK(txq) == 0)
-			continue;
-		iflib_txq_start(txq);
-		TXQ_UNLOCK(txq);
-	}
+	for (i = 0; i < sctx->isc_nqsets; i++, txq++)
+		buf_ring_sc_drain(txq->ift_br[0], IFLIB_RESTART_BUDGET);
 }
 
 #if 0
@@ -1711,13 +1634,26 @@ iflib_if_transmit(if_t ifp, struct mbuf *m)
 {
 	iflib_ctx_t	ctx = if_getsoftc(ifp);
 	iflib_txq_t txq;
-	int err = 0, qidx = 0;
+	struct mbuf *marr[16], **mp, *next, *tnext;
+	int err, i, count, qidx;
 
 	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0 || !LINK_ACTIVE(ctx)) {
 		m_freem(m);
 		return (0);
 	}
-
+	qidx = count = 0;
+	mp = marr;
+	for (next = m; next->m_nextpkt != NULL; next = next->m_nextpkt)
+		count++;
+	if (count > 16)
+		if ((mp = malloc(count*sizeof(struct mbuf *), M_IFLIB, M_NOWAIT)) == NULL)
+			return (ENOBUFS);
+	for (tnext = next = m, i = 0; next != NULL; i++) {
+		mp[i] = next;
+		tnext = next;
+		next = tnext->m_nextpkt;
+		tnext->m_nextpkt = NULL;
+	}
 	if ((NQSETS(ctx) > 1) && M_HASHTYPE_GET(m))
 		qidx = QIDX(ctx, m);
 	/*
@@ -1725,19 +1661,11 @@ iflib_if_transmit(if_t ifp, struct mbuf *m)
 	 */
 	txq = &ctx->ifc_txqs[qidx];
 
-	if (!TXQ_LOCK_HELD(txq) && TXQ_TRYLOCK(txq)) {
-		err = iflib_txq_transmit(ifp, txq, m);
-		TXQ_UNLOCK(txq);
-	} else if (m != NULL) {
-		err = iflib_enqueue_pkt(ifp, txq, m);
-		/* Minimize a small race between another thread dropping the
-		 * lock and us enqueuing the buffer on the buf_ring
-		 */
-		if (err == 0 && !TXQ_LOCK_HELD(txq) && TXQ_TRYLOCK(txq)) {
-			iflib_txq_start(txq);
-			TXQ_UNLOCK(txq);
-		}
-	}
+	err = buf_ring_sc_enqueue(txq->ift_br[0], (void **)mp, count, IFLIB_BUDGET);
+	/* drain => err = iflib_txq_transmit(ifp, txq, m); */
+
+	if (count > 16)
+		free(mp, M_IFLIB);
 	return (err);
 }
 
@@ -1746,16 +1674,10 @@ iflib_if_qflush(if_t ifp)
 {
 	iflib_ctx_t ctx = if_getsoftc(ifp);
 	iflib_txq_t txq = ctx->ifc_txqs;
-	struct mbuf     *m;
 
-	for (int i = 0; i < NQSETS(ctx); i++, txq++) {
-		TXQ_LOCK(txq);
-		for (int j = 0; j < txq->ift_nbr; j++) {
-			while ((m = buf_ring_dequeue_sc(txq->ift_br[j])) != NULL)
-				m_freem(m);
-		}
-		TXQ_UNLOCK(txq);
-	}
+	ctx->ifc_flags |= IFC_QFLUSH;
+	for (int i = 0; i < NQSETS(ctx); i++, txq++)
+		buf_ring_sc_drain(txq->ift_br[0], 0);
 	if_qflush(ifp);
 }
 
@@ -2079,10 +2001,8 @@ iflib_device_resume(device_t dev)
 	iflib_init_locked(sctx->isc_ctx);
 	SCTX_UNLOCK(sctx);
 	for (int i = 0; i < sctx->isc_nqsets; i++, txq++)
-		if (TXQ_TRYLOCK(txq)) {
-			iflib_txq_start(txq);
-			TXQ_UNLOCK(txq);
-		}
+		buf_ring_sc_drain(txq->ift_br[0], IFLIB_RESTART_BUDGET);
+
 	return (bus_generic_resume(dev));
 }
 
@@ -2125,6 +2045,14 @@ iflib_module_event_handler(module_t mod, int what, void *arg)
 
 	return (0);
 }
+
+struct buf_ring_sc_consumer brsc = {
+	iflib_txq_drain,
+	iflib_txq_deferred,
+	NULL,
+	0
+};
+
 
 /*********************************************************************
  *
@@ -2271,14 +2199,14 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 		callout_init_mtx(&txq->ift_timer, &txq->ift_mtx, 0);
 
 		/* Allocate a buf ring */
+		brsc.brsc_sc = txq;
 		for (j = 0; j < nbuf_rings; j++)
-			if ((txq->ift_br[j] = buf_ring_alloc(4096, M_DEVBUF,
-												 M_WAITOK, &txq->ift_mtx)) == NULL) {
+			if ((txq->ift_br[j] = buf_ring_sc_alloc(4096, M_DEVBUF,
+													M_WAITOK, &brsc)) == NULL) {
 				device_printf(dev, "Unable to allocate buf_ring\n");
 				err = ENOMEM;
 				goto fail;
 			}
-
 		/*
      * Next the RX queues...
 	 */
@@ -2371,7 +2299,6 @@ iflib_rx_structures_setup(if_shared_ctx_t sctx)
 	int i,  q, err;
 
 	for (q = 0; q < sctx->isc_nrxq; q++, rxq++) {
-		RXQ_LOCK(rxq);
 		tcp_lro_free(&rxq->ifr_lc);
 		for (i = 0, fl = rxq->ifr_fl; i < rxq->ifr_nfl; i++, fl++)
 			if (iflib_fl_setup(fl)) {
@@ -2388,7 +2315,6 @@ iflib_rx_structures_setup(if_shared_ctx_t sctx)
 		}
 
 		IFDI_RXQ_SETUP(sctx, rxq->ifr_id);
-		RXQ_UNLOCK(rxq);
 	}
 	return (0);
 fail:
@@ -2402,7 +2328,6 @@ fail:
 		iflib_rx_sds_free(rxq);
 		rxq->ifr_cidx = rxq->ifr_pidx = 0;
 	}
-	RXQ_UNLOCK(rxq);
 	return (err);
 }
 
@@ -2518,7 +2443,7 @@ iflib_legacy_setup(if_shared_ctx_t sctx, driver_filter_t filter, int *rid)
 	if_irq_t irq = &ctx->ifc_legacy_irq;
 	int err;
 
-	ctx->ifc_flags |= IFLIB_LEGACY;
+	ctx->ifc_flags |= IFC_LEGACY;
 	/* We allocate a single interrupt resource */
 	if ((err = iflib_irq_alloc(sctx, irq, *rid, filter, NULL, sctx, NULL)) != 0)
 		return (err);
@@ -2633,11 +2558,4 @@ iflib_sctx_lock_get(if_shared_ctx_t sctx)
 {
 
 	return (&sctx->isc_ctx->ifc_mtx);
-}
-
-struct mtx *
-iflib_qset_lock_get(if_shared_ctx_t sctx, uint16_t qsidx)
-{
-
-	return (&sctx->isc_ctx->ifc_txqs[qsidx].ift_mtx);
 }
