@@ -46,12 +46,16 @@ struct buf_ring_sc_consumer {
 	int (*brsc_drain) (struct buf_ring_sc *br, int avail, void *sc);
 	void (*brsc_deferred) (struct buf_ring_sc *br, void *sc);
 	void *brsc_sc;
+	int brsc_domain;
 	int brsc_flags;
 
 };
 
 /* cache line align buf ring entries */
 #define BR_FLAGS_ALIGNED 0x1
+
+
+#define BR_NODOMAIN 0xffffffff
 
 struct buf_ring_sc *buf_ring_sc_alloc(int count, struct malloc_type *type, int flags, struct buf_ring_sc_consumer *brsc);
 void buf_ring_sc_free(struct buf_ring_sc *br, struct malloc_type *type);

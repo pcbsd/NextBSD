@@ -34,6 +34,9 @@ __FBSDID("$FreeBSD$");
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/ktr.h>
+#include <sys/pcpu.h>
+#include <sys/proc.h>
+#include <sys/sched.h>
 
 #include <sys/buf_ring.h>
 #include <sys/buf_ring_sc.h>
@@ -152,6 +155,7 @@ struct buf_ring_sc {
 	int              	br_size __aligned(CACHE_LINE_SIZE);
 	int              	br_mask;
 	int			br_flags;
+	int			br_domain;
 	counter_u64_t		br_enqueues;
 	counter_u64_t		br_drops;
 	counter_u64_t		br_starts;
@@ -237,6 +241,7 @@ buf_ring_sc_alloc(int count, struct malloc_type *type, int flags,
 	br->br_deferred = brsc->brsc_deferred;
 	br->br_flags = brsc->brsc_flags;
 	br->br_sc = brsc->brsc_sc;
+	br->br_domain = brsc->brsc_domain;
 	br->br_size = count;
 	br->br_mask = count-1;
 	br->br_prod_value = br->br_prod_tail = 0;
@@ -330,11 +335,27 @@ buf_ring_sc_drain(struct buf_ring_sc *br, int budget)
 	br_state state;
 	int pending;
 
+	critical_enter();
+	if (br->br_domain == PCPU_GET(domain))
+		sched_pin();
+	else if (br->br_domain != BR_NODOMAIN) {
+		br->br_deferred(br, br->br_sc);
+		critical_exit();
+		return;
+	}
+	critical_exit();
+
 	if (__predict_false(budget == 0))
 		buf_ring_sc_lock(br);
-	else if (!buf_ring_sc_trylock(br))
+	else if (!buf_ring_sc_trylock(br)) {
+		if (br->br_domain == PCPU_GET(domain))
+			sched_unpin();
 		return;
+	}
+
 	state = buf_ring_sc_drain_locked(br, budget);
+	if (br->br_domain == PCPU_GET(domain))
+			sched_unpin();
 	pending = buf_ring_sc_unlock(br, state);
 	if ((state == BR_ABDICATED) && pending == 0)
 		br->br_deferred(br, br->br_sc);
@@ -433,7 +454,7 @@ buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int budget)
 {
 	uint32_t prod_head, prod_next, cons, value;
 	uint32_t pidx, cidx;
-	int pending, rc, avail;
+	int pending, rc, avail, domainvalid;
 	prod_state state;
 #ifdef DEBUG_BUFRING
 	int i, j;
@@ -446,6 +467,8 @@ buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int budget)
 #endif
 	critical_enter();
 
+	if (br->br_domain == BR_NODOMAIN || br->br_domain == PCPU_GET(domain))
+		domainvalid = 1;
 	state = br->br_prod_state;
 	pending = false;
 	rc = 0;
@@ -456,7 +479,7 @@ buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int budget)
 	 * drops the lock before we can do that then the lock will be
 	 * re-acquired normally
 	 */
-	while (BR_HANDOFF(br) && state.ps_flags == BR_OWNED && budget > 0) {
+	while (BR_HANDOFF(br) && state.ps_flags == BR_OWNED && budget > 0 && domainvalid) {
 		prod_head = br->br_prod_head;
 		pidx = BR_INDEX(prod_head);
 		cons = br->br_cons;
@@ -505,7 +528,7 @@ buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int budget)
 		prod_next = (pidx + count) & br->br_mask;
 
 
-		if (state.ps_flags == 0 && budget > 0) {
+		if (state.ps_flags == 0 && budget > 0 && domainvalid) {
 			prod_next |= BR_RING_OWNED;
 			rc = EOWNED;
 		} else
@@ -538,8 +561,11 @@ buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int budget)
 		atomic_set_acq_32(&br->br_prod_value, BR_RING_OWNED);
 		rc = EOWNED;
 	}
-	if (rc == EOWNED)
+	if (rc == EOWNED) {
 		br->br_cons &= BR_RING_FLAGS_MASK;
+		if (br->br_domain == PCPU_GET(domain))
+			sched_pin();
+	}
     /*
 	 * we became owner by way of the contested abdicate clear pending
 	 */
@@ -552,6 +578,8 @@ buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int budget)
 	/* we're the owner - our buffers were enqueued */
 	if (rc == EOWNED) {
 		br_state state = buf_ring_sc_drain_locked(br, budget);
+		if (br->br_domain == PCPU_GET(domain))
+			sched_unpin();
 		if (buf_ring_sc_unlock(br, state) == 0 && state == BR_ABDICATED)
 			br->br_deferred(br, br->br_sc); /* consumer's re-drive mechanism */
 	}
