@@ -53,9 +53,7 @@ struct buf_ring_sc_consumer {
 
 /* cache line align buf ring entries */
 #define BR_FLAGS_ALIGNED 0x1
-
-
-#define BR_NODOMAIN 0xffffffff
+#define BR_FLAGS_NUMA    0x2
 
 struct buf_ring_sc *buf_ring_sc_alloc(int count, struct malloc_type *type, int flags, struct buf_ring_sc_consumer *brsc);
 void buf_ring_sc_free(struct buf_ring_sc *br, struct malloc_type *type);

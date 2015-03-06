@@ -137,6 +137,8 @@ typedef union prod_state_ {
 #define BR_RING_PENDING (1<<30)
 #define BR_RING_OWNED   (1<<31)
 
+#define BR_NODOMAIN 0xffffffff
+
 typedef enum br_state_ {
 	BR_IDLE = 1,
 	BR_ABDICATED,
@@ -241,7 +243,10 @@ buf_ring_sc_alloc(int count, struct malloc_type *type, int flags,
 	br->br_deferred = brsc->brsc_deferred;
 	br->br_flags = brsc->brsc_flags;
 	br->br_sc = brsc->brsc_sc;
-	br->br_domain = brsc->brsc_domain;
+	if (brsc->brsc_flags & BR_FLAGS_NUMA)
+		br->br_domain = brsc->brsc_domain;
+	else
+		br->br_domain = BR_NODOMAIN;
 	br->br_size = count;
 	br->br_mask = count-1;
 	br->br_prod_value = br->br_prod_tail = 0;
