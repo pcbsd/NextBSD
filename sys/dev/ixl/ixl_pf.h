@@ -38,6 +38,17 @@
 
 /* Physical controller structure */
 struct ixl_pf {
+	/*
+	** VSI - Stations: 
+	**   These are the traffic class holders, and
+	**   will have a stack interface and queues 
+	**   associated with them.
+	** NOTE: for now using just one, so embed it.
+	**       also, to make it interchangeable place it _first_
+	*/
+	struct ixl_vsi		vsi;
+
+
 	struct i40e_hw		hw;
 	struct i40e_osdep	osdep;
 	struct device		*dev;
@@ -57,8 +68,6 @@ struct ixl_pf {
 	int			msix;
 	int			if_flags;
 
-	struct mtx		pf_mtx;
-
 	u32			qbase;
 	u32 			admvec;
 	struct task     	adminq;
@@ -67,14 +76,6 @@ struct ixl_pf {
 	int			advertised_speed;
 	int			fc; /* local flow ctrl setting */
 
-	/*
-	** VSI - Stations: 
-	**   These are the traffic class holders, and
-	**   will have a stack interface and queues 
-	**   associated with them.
-	** NOTE: for now using just one, so embed it.
-	*/
-	struct ixl_vsi		vsi;
 
 	/* Misc stats maintained by the driver */
 	u64			watchdog_events;
@@ -85,13 +86,5 @@ struct ixl_pf {
 	struct i40e_hw_port_stats	stats_offsets;
 	bool 				stat_offsets_loaded;
 };
-
-
-#define IXL_PF_LOCK_INIT(_sc, _name) \
-        mtx_init(&(_sc)->pf_mtx, _name, "IXL PF Lock", MTX_DEF)
-#define IXL_PF_LOCK(_sc)              mtx_lock(&(_sc)->pf_mtx)
-#define IXL_PF_UNLOCK(_sc)            mtx_unlock(&(_sc)->pf_mtx)
-#define IXL_PF_LOCK_DESTROY(_sc)      mtx_destroy(&(_sc)->pf_mtx)
-#define IXL_PF_LOCK_ASSERT(_sc)       mtx_assert(&(_sc)->pf_mtx, MA_OWNED)
 
 #endif /* _IXL_PF_H_ */

@@ -45,6 +45,8 @@
 #include <net/rss_config.h>
 #endif
 
+#include "ifdi_if.h"
+
 /*********************************************************************
  *  Driver version
  *********************************************************************/
@@ -88,16 +90,7 @@ static char    *ixl_strings[] = {
  *********************************************************************/
 static int      ixl_probe(device_t);
 static int      ixl_attach(device_t);
-static int      ixl_detach(device_t);
-static int      ixl_shutdown(device_t);
 static int	ixl_get_hw_capabilities(struct ixl_pf *);
-static void	ixl_cap_txcsum_tso(struct ixl_vsi *, struct ifnet *, int);
-static int      ixl_ioctl(struct ifnet *, u_long, caddr_t);
-static void	ixl_init(void *);
-static void	ixl_init_locked(struct ixl_pf *);
-static void     ixl_stop(struct ixl_pf *);
-static void     ixl_media_status(struct ifnet *, struct ifmediareq *);
-static int      ixl_media_change(struct ifnet *);
 static void     ixl_update_link_status(struct ixl_pf *);
 static int      ixl_allocate_pci_resources(struct ixl_pf *);
 static u16	ixl_get_bus_info(struct i40e_hw *, device_t);
@@ -111,7 +104,6 @@ static void	ixl_configure_msix(struct ixl_pf *);
 static void	ixl_configure_itr(struct ixl_pf *);
 static void	ixl_configure_legacy(struct ixl_pf *);
 static void	ixl_free_pci_resources(struct ixl_pf *);
-static void	ixl_local_timer(void *);
 static int	ixl_setup_interface(device_t, struct ixl_vsi *);
 static bool	ixl_config_link(struct i40e_hw *);
 static void	ixl_config_rss(struct ixl_vsi *);
@@ -131,11 +123,7 @@ static void     ixl_disable_queue(struct i40e_hw *, int);
 static void     ixl_enable_legacy(struct i40e_hw *);
 static void     ixl_disable_legacy(struct i40e_hw *);
 
-static void     ixl_set_promisc(struct ixl_vsi *);
-static void     ixl_add_multi(struct ixl_vsi *);
 static void     ixl_del_multi(struct ixl_vsi *);
-static void	ixl_register_vlan(void *, struct ifnet *, u16);
-static void	ixl_unregister_vlan(void *, struct ifnet *, u16);
 static void	ixl_setup_vlan_filters(struct ixl_vsi *);
 
 static void	ixl_init_filters(struct ixl_vsi *);
@@ -152,13 +140,10 @@ static int	ixl_debug_info(SYSCTL_HANDLER_ARGS);
 static void	ixl_print_debug_info(struct ixl_pf *);
 
 /* The MSI/X Interrupt handlers */
-static void	ixl_intr(void *);
-static void	ixl_msix_que(void *);
-static void	ixl_msix_adminq(void *);
+static int	ixl_intr(void *);
+static int	ixl_msix_que(void *);
+static int	ixl_msix_adminq(void *);
 static void	ixl_handle_mdd_event(struct ixl_pf *);
-
-/* Deferred interrupt tasklets */
-static void	ixl_do_adminq(void *, int);
 
 /* Sysctl handlers */
 static int	ixl_set_flowcntl(SYSCTL_HANDLER_ARGS);
@@ -191,6 +176,30 @@ static int	ixl_sysctl_switch_config(SYSCTL_HANDLER_ARGS);
 static int	ixl_sysctl_dump_txd(SYSCTL_HANDLER_ARGS);
 #endif
 
+static int      ixl_if_detach(if_shared_ctx_t);
+
+static void		ixl_if_init(if_shared_ctx_t sctx);
+static void		ixl_if_stop(if_shared_ctx_t sctx);
+
+static void		ixl_if_intr_enable(if_shared_ctx_t sctx);
+static void		ixl_if_intr_disable(if_shared_ctx_t sctx);
+static void		ixl_if_rx_intr_enable(if_shared_ctx_t sctx, uint16_t rxqid);
+
+
+static void	ixl_if_multi_set(if_shared_ctx_t);
+static int	ixl_if_queues_alloc(if_shared_ctx_t);
+static void ixl_if_queues_free(if_shared_ctx_t sctx);
+static void	ixl_if_update_admin_status(if_shared_ctx_t);
+static int	ixl_if_mtu_set(if_shared_ctx_t, uint32_t);
+
+static void	ixl_if_media_status(if_shared_ctx_t, struct ifmediareq *);
+static int	ixl_if_media_change(if_shared_ctx_t);
+
+static void ixl_if_timer(if_shared_ctx_t, uint16_t);
+static int ixl_if_promisc_set(if_shared_ctx_t sctx, int flags);
+static void ixl_if_vlan_register(if_shared_ctx_t sctx, u16 vtag);
+static void ixl_if_vlan_unregister(if_shared_ctx_t sctx, u16 vtag);
+
 /*********************************************************************
  *  FreeBSD Device Interface Entry Points
  *********************************************************************/
@@ -199,8 +208,8 @@ static device_method_t ixl_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_probe, ixl_probe),
 	DEVMETHOD(device_attach, ixl_attach),
-	DEVMETHOD(device_detach, ixl_detach),
-	DEVMETHOD(device_shutdown, ixl_shutdown),
+	DEVMETHOD(device_detach, iflib_device_detach),
+	DEVMETHOD(device_shutdown, iflib_device_suspend),
 	{0, 0}
 };
 
@@ -213,11 +222,33 @@ DRIVER_MODULE(ixl, pci, ixl_driver, ixl_devclass, 0, 0);
 
 MODULE_DEPEND(ixl, pci, 1, 1, 1);
 MODULE_DEPEND(ixl, ether, 1, 1, 1);
+MODULE_DEPEND(ixl, iflib, 1, 1, 1);
 
-/*
-** Global reset mutex
-*/
-static struct mtx ixl_reset_mtx;
+
+static device_method_t ixl_if_methods[] = {
+	DEVMETHOD(ifdi_detach, ixl_if_detach),
+	DEVMETHOD(ifdi_init, ixl_if_init),
+	DEVMETHOD(ifdi_stop, ixl_if_stop),
+	DEVMETHOD(ifdi_intr_disable, ixl_if_intr_disable),
+	DEVMETHOD(ifdi_intr_enable, ixl_if_intr_enable),
+	DEVMETHOD(ifdi_rx_intr_enable, ixl_if_rx_intr_enable),
+	DEVMETHOD(ifdi_multi_set, ixl_if_multi_set),
+	DEVMETHOD(ifdi_queues_alloc, ixl_if_queues_alloc),
+	DEVMETHOD(ifdi_update_admin_status, ixl_if_update_admin_status),
+	DEVMETHOD(ifdi_mtu_set, ixl_if_mtu_set),
+	DEVMETHOD(ifdi_media_status, ixl_if_media_status),
+	DEVMETHOD(ifdi_media_change, ixl_if_media_change),
+	DEVMETHOD(ifdi_timer, ixl_if_timer),
+	DEVMETHOD(ifdi_promisc_set, ixl_if_promisc_set),
+	DEVMETHOD(ifdi_vlan_register, ixl_if_vlan_register),
+	DEVMETHOD(ifdi_vlan_unregister, ixl_if_vlan_unregister),
+	DEVMETHOD(ifdi_queues_free, ixl_if_queues_free),
+	DEVMETHOD_END
+};
+
+static driver_t ixl_if_driver = {
+	"ixl_if", ixl_if_methods, sizeof(struct if_shared_ctx),
+};
 
 /*
 ** TUNEABLE PARAMETERS:
@@ -297,6 +328,54 @@ static char *ixl_fc_string[6] = {
 	"Default"
 };
 
+static int
+ixl_if_queues_alloc(if_shared_ctx_t sctx)
+{
+	struct ixl_vsi *vsi = DOWNCAST(sctx);
+	struct ixl_queue *que;
+	struct ixl_tx_buf *bufs;
+	int i;
+
+	/* Allocate queue structure memory */
+	if (!(vsi->queues =
+	    (struct ixl_queue *) malloc(sizeof(struct ixl_queue) *
+	    vsi->num_queues, M_DEVBUF, M_NOWAIT | M_ZERO))) {
+		device_printf(sctx->isc_dev, "Unable to allocate TX ring memory\n");
+		return (ENOMEM);
+	}
+	if (!(bufs = malloc(sizeof(*bufs)*sctx->isc_ntxd*vsi->num_queues, M_DEVBUF, M_NOWAIT|M_ZERO))) {
+		free(vsi->queues, M_DEVBUF);
+		return (ENOMEM);
+	}
+	
+	for (i = 0, que = vsi->queues; i < vsi->num_queues; i++, que++) {
+		uint64_t paddrs[2];
+		caddr_t vaddrs[2];
+		que->me = i;
+
+		/* get the virtual and physical address of the hardware queues */
+		iflib_qset_addr_get(sctx, i, vaddrs, paddrs, 2);
+		que->txr.tx_base = (struct i40e_tx_desc *)vaddrs[0];
+		que->txr.tx_paddr = paddrs[0];
+		que->rxr.rx_base = (union i40e_rx_desc *)vaddrs[1];
+		que->rxr.rx_paddr = paddrs[1];
+		que->txr.que = que->rxr.que = que;
+		que->txr.tx_buffers = bufs + i*sctx->isc_ntxd;
+	}
+	return (0);
+}
+
+
+static void
+ixl_if_queues_free(if_shared_ctx_t sctx)
+{
+	struct ixl_vsi *vsi = DOWNCAST(sctx);
+	struct ixl_queue *que;
+
+	que = vsi->queues;
+	free(que->txr.tx_buffers, M_DEVBUF);
+	free(que, M_DEVBUF);
+}
 
 /*********************************************************************
  *  Device identification routine
@@ -315,7 +394,6 @@ ixl_probe(device_t dev)
 	u16	pci_vendor_id, pci_device_id;
 	u16	pci_subvendor_id, pci_subdevice_id;
 	char	device_name[256];
-	static bool lock_init = FALSE;
 
 	INIT_DEBUGOUT("ixl_probe: begin");
 
@@ -341,13 +419,6 @@ ixl_probe(device_t dev)
 				ixl_strings[ent->index],
 				ixl_driver_version);
 			device_set_desc_copy(dev, device_name);
-			/* One shot mutex init */
-			if (lock_init == FALSE) {
-				lock_init = TRUE;
-				mtx_init(&ixl_reset_mtx,
-				    "ixl_reset",
-				    "IXL RESET Lock", MTX_DEF);
-			}
 			return (BUS_PROBE_DEFAULT);
 		}
 		ent++;
@@ -373,12 +444,13 @@ ixl_attach(device_t dev)
 	struct ixl_vsi *vsi;
 	u16		bus;
 	int             error = 0;
+	if_shared_ctx_t sctx;
 
 	INIT_DEBUGOUT("ixl_attach: begin");
 
 	/* Allocate, clear, and link in our primary soft structure */
 	pf = device_get_softc(dev);
-	pf->dev = pf->osdep.dev = dev;
+	sctx = UPCAST(pf);
 	hw = &pf->hw;
 
 	/*
@@ -386,13 +458,6 @@ ixl_attach(device_t dev)
 	** this could be enhanced later to allocate multiple
 	*/
 	vsi = &pf->vsi;
-	vsi->dev = pf->dev;
-
-	/* Core Lock Init*/
-	IXL_PF_LOCK_INIT(pf, device_get_nameunit(dev));
-
-	/* Set up the timer callout */
-	callout_init_mtx(&pf->timer, &pf->pf_mtx, 0);
 
 	/* Set up sysctls */
 	SYSCTL_ADD_PROC(device_get_sysctl_ctx(dev),
@@ -479,6 +544,7 @@ ixl_attach(device_t dev)
 	hw->bus.device = pci_get_slot(dev);
 	hw->bus.func = pci_get_function(dev);
 
+	
 	/* Do PCI setup - map BAR0, etc */
 	if (ixl_allocate_pci_resources(pf)) {
 		device_printf(dev, "Allocation of PCI resources failed\n");
@@ -589,7 +655,7 @@ ixl_attach(device_t dev)
 	else
 		error = ixl_assign_vsi_legacy(pf);
 	if (error) 
-		goto err_late;
+		goto err_mac_hmc;
 
 	if (((hw->aq.fw_maj_ver == 4) && (hw->aq.fw_min_ver < 33)) ||
 	    (hw->aq.fw_maj_ver < 4)) {
@@ -613,10 +679,15 @@ ixl_attach(device_t dev)
 		    "an unqualified module was detected\n");
 
 	/* Setup OS specific network interface */
+	if ((error = iflib_register(dev, &ixl_if_driver, hw->mac.addr)) != 0) {
+		/* ixl specific teardown */
+		return (error);
+	}
+
 	if (ixl_setup_interface(dev, vsi) != 0) {
 		device_printf(dev, "interface setup failed!\n");
 		error = EIO;
-		goto err_late;
+		goto err_mac_hmc;
 	}
 
 	error = ixl_switch_config(pf);
@@ -640,19 +711,9 @@ ixl_attach(device_t dev)
 	ixl_update_stats_counters(pf);
 	ixl_add_hw_stats(pf);
 
-	/* Register for VLAN events */
-	vsi->vlan_attach = EVENTHANDLER_REGISTER(vlan_config,
-	    ixl_register_vlan, vsi, EVENTHANDLER_PRI_FIRST);
-	vsi->vlan_detach = EVENTHANDLER_REGISTER(vlan_unconfig,
-	    ixl_unregister_vlan, vsi, EVENTHANDLER_PRI_FIRST);
-
-
 	INIT_DEBUGOUT("ixl_attach: end");
 	return (0);
 
-err_late:
-	if (vsi->ifp != NULL)
-		if_free(vsi->ifp);
 err_mac_hmc:
 	i40e_shutdown_lan_hmc(hw);
 err_get_cap:
@@ -660,7 +721,6 @@ err_get_cap:
 err_out:
 	ixl_free_pci_resources(pf);
 	ixl_free_vsi(vsi);
-	IXL_PF_LOCK_DESTROY(pf);
 	return (error);
 }
 
@@ -675,82 +735,33 @@ err_out:
  *********************************************************************/
 
 static int
-ixl_detach(device_t dev)
+ixl_if_detach(if_shared_ctx_t sctx)
 {
-	struct ixl_pf		*pf = device_get_softc(dev);
+	struct ixl_vsi		*vsi = DOWNCAST(sctx);
+	struct ixl_pf		*pf = vsi->back;
 	struct i40e_hw		*hw = &pf->hw;
-	struct ixl_vsi		*vsi = &pf->vsi;
-	struct ixl_queue	*que = vsi->queues;
 	i40e_status		status;
 
 	INIT_DEBUGOUT("ixl_detach: begin");
 
-	/* Make sure VLANS are not using driver */
-	if (vsi->ifp->if_vlantrunk != NULL) {
-		device_printf(dev,"Vlan in use, detach first\n");
-		return (EBUSY);
-	}
-
-	ether_ifdetach(vsi->ifp);
-	if (vsi->ifp->if_drv_flags & IFF_DRV_RUNNING) {
-		IXL_PF_LOCK(pf);
-		ixl_stop(pf);
-		IXL_PF_UNLOCK(pf);
-	}
-
-	for (int i = 0; i < vsi->num_queues; i++, que++) {
-		if (que->tq) {
-			taskqueue_drain(que->tq, &que->task);
-			taskqueue_drain(que->tq, &que->tx_task);
-			taskqueue_free(que->tq);
-		}
-	}
 
 	/* Shutdown LAN HMC */
 	status = i40e_shutdown_lan_hmc(hw);
 	if (status)
-		device_printf(dev,
+		device_printf(sctx->isc_dev,
 		    "Shutdown LAN HMC failed with code %d\n", status);
 
 	/* Shutdown admin queue */
 	status = i40e_shutdown_adminq(hw);
 	if (status)
-		device_printf(dev,
+		device_printf(sctx->isc_dev,
 		    "Shutdown Admin queue failed with code %d\n", status);
-
-	/* Unregister VLAN events */
-	if (vsi->vlan_attach != NULL)
-		EVENTHANDLER_DEREGISTER(vlan_config, vsi->vlan_attach);
-	if (vsi->vlan_detach != NULL)
-		EVENTHANDLER_DEREGISTER(vlan_unconfig, vsi->vlan_detach);
-
-	callout_drain(&pf->timer);
 
 
 	ixl_free_pci_resources(pf);
-	bus_generic_detach(dev);
-	if_free(vsi->ifp);
 	ixl_free_vsi(vsi);
-	IXL_PF_LOCK_DESTROY(pf);
 	return (0);
 }
-
-/*********************************************************************
- *
- *  Shutdown entry point
- *
- **********************************************************************/
-
-static int
-ixl_shutdown(device_t dev)
-{
-	struct ixl_pf *pf = device_get_softc(dev);
-	IXL_PF_LOCK(pf);
-	ixl_stop(pf);
-	IXL_PF_UNLOCK(pf);
-	return (0);
-}
-
 
 /*********************************************************************
  *
@@ -810,222 +821,26 @@ retry:
 	return (error);
 }
 
-static void
-ixl_cap_txcsum_tso(struct ixl_vsi *vsi, struct ifnet *ifp, int mask)
-{
-	device_t 	dev = vsi->dev;
-
-	/* Enable/disable TXCSUM/TSO4 */
-	if (!(ifp->if_capenable & IFCAP_TXCSUM)
-	    && !(ifp->if_capenable & IFCAP_TSO4)) {
-		if (mask & IFCAP_TXCSUM) {
-			ifp->if_capenable |= IFCAP_TXCSUM;
-			/* enable TXCSUM, restore TSO if previously enabled */
-			if (vsi->flags & IXL_FLAGS_KEEP_TSO4) {
-				vsi->flags &= ~IXL_FLAGS_KEEP_TSO4;
-				ifp->if_capenable |= IFCAP_TSO4;
-			}
-		}
-		else if (mask & IFCAP_TSO4) {
-			ifp->if_capenable |= (IFCAP_TXCSUM | IFCAP_TSO4);
-			vsi->flags &= ~IXL_FLAGS_KEEP_TSO4;
-			device_printf(dev,
-			    "TSO4 requires txcsum, enabling both...\n");
-		}
-	} else if((ifp->if_capenable & IFCAP_TXCSUM)
-	    && !(ifp->if_capenable & IFCAP_TSO4)) {
-		if (mask & IFCAP_TXCSUM)
-			ifp->if_capenable &= ~IFCAP_TXCSUM;
-		else if (mask & IFCAP_TSO4)
-			ifp->if_capenable |= IFCAP_TSO4;
-	} else if((ifp->if_capenable & IFCAP_TXCSUM)
-	    && (ifp->if_capenable & IFCAP_TSO4)) {
-		if (mask & IFCAP_TXCSUM) {
-			vsi->flags |= IXL_FLAGS_KEEP_TSO4;
-			ifp->if_capenable &= ~(IFCAP_TXCSUM | IFCAP_TSO4);
-			device_printf(dev, 
-			    "TSO4 requires txcsum, disabling both...\n");
-		} else if (mask & IFCAP_TSO4)
-			ifp->if_capenable &= ~IFCAP_TSO4;
-	}
-
-	/* Enable/disable TXCSUM_IPV6/TSO6 */
-	if (!(ifp->if_capenable & IFCAP_TXCSUM_IPV6)
-	    && !(ifp->if_capenable & IFCAP_TSO6)) {
-		if (mask & IFCAP_TXCSUM_IPV6) {
-			ifp->if_capenable |= IFCAP_TXCSUM_IPV6;
-			if (vsi->flags & IXL_FLAGS_KEEP_TSO6) {
-				vsi->flags &= ~IXL_FLAGS_KEEP_TSO6;
-				ifp->if_capenable |= IFCAP_TSO6;
-			}
-		} else if (mask & IFCAP_TSO6) {
-			ifp->if_capenable |= (IFCAP_TXCSUM_IPV6 | IFCAP_TSO6);
-			vsi->flags &= ~IXL_FLAGS_KEEP_TSO6;
-			device_printf(dev,
-			    "TSO6 requires txcsum6, enabling both...\n");
-		}
-	} else if((ifp->if_capenable & IFCAP_TXCSUM_IPV6)
-	    && !(ifp->if_capenable & IFCAP_TSO6)) {
-		if (mask & IFCAP_TXCSUM_IPV6)
-			ifp->if_capenable &= ~IFCAP_TXCSUM_IPV6;
-		else if (mask & IFCAP_TSO6)
-			ifp->if_capenable |= IFCAP_TSO6;
-	} else if ((ifp->if_capenable & IFCAP_TXCSUM_IPV6)
-	    && (ifp->if_capenable & IFCAP_TSO6)) {
-		if (mask & IFCAP_TXCSUM_IPV6) {
-			vsi->flags |= IXL_FLAGS_KEEP_TSO6;
-			ifp->if_capenable &= ~(IFCAP_TXCSUM_IPV6 | IFCAP_TSO6);
-			device_printf(dev,
-			    "TSO6 requires txcsum6, disabling both...\n");
-		} else if (mask & IFCAP_TSO6)
-			ifp->if_capenable &= ~IFCAP_TSO6;
-	}
-}
-
 /*********************************************************************
- *  Ioctl entry point
+ *  Ioctl mtu entry point
  *
- *  ixl_ioctl is called when the user wants to configure the
- *  interface.
- *
- *  return 0 on success, positive on failure
+ * 
+ *  return 0 on success, EINVAL on failure
  **********************************************************************/
-
 static int
-ixl_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
+ixl_if_mtu_set(if_shared_ctx_t sctx, uint32_t mtu)
 {
-	struct ixl_vsi	*vsi = ifp->if_softc;
-	struct ixl_pf	*pf = (struct ixl_pf *)vsi->back;
-	struct ifreq	*ifr = (struct ifreq *) data;
-#if defined(INET) || defined(INET6)
-	struct ifaddr *ifa = (struct ifaddr *)data;
-	bool		avoid_reset = FALSE;
-#endif
-	int             error = 0;
+	struct ixl_vsi *vsi = DOWNCAST(sctx);
 
-	switch (command) {
+	IOCTL_DEBUGOUT("ioctl: SIOCSIFMTU (Set Interface MTU)");
+	if (mtu > IXL_MAX_FRAME - ETHER_HDR_LEN - ETHER_CRC_LEN -
+		ETHER_VLAN_ENCAP_LEN)
+		return (EINVAL);
 
-        case SIOCSIFADDR:
-#ifdef INET
-		if (ifa->ifa_addr->sa_family == AF_INET)
-			avoid_reset = TRUE;
-#endif
-#ifdef INET6
-		if (ifa->ifa_addr->sa_family == AF_INET6)
-			avoid_reset = TRUE;
-#endif
-#if defined(INET) || defined(INET6)
-		/*
-		** Calling init results in link renegotiation,
-		** so we avoid doing it when possible.
-		*/
-		if (avoid_reset) {
-			ifp->if_flags |= IFF_UP;
-			if (!(ifp->if_drv_flags & IFF_DRV_RUNNING))
-				ixl_init(pf);
-#ifdef INET
-			if (!(ifp->if_flags & IFF_NOARP))
-				arp_ifinit(ifp, ifa);
-#endif
-		} else
-			error = ether_ioctl(ifp, command, data);
-		break;
-#endif
-	case SIOCSIFMTU:
-		IOCTL_DEBUGOUT("ioctl: SIOCSIFMTU (Set Interface MTU)");
-		if (ifr->ifr_mtu > IXL_MAX_FRAME -
-		   ETHER_HDR_LEN - ETHER_CRC_LEN - ETHER_VLAN_ENCAP_LEN) {
-			error = EINVAL;
-		} else {
-			IXL_PF_LOCK(pf);
-			ifp->if_mtu = ifr->ifr_mtu;
-			vsi->max_frame_size =
-				ifp->if_mtu + ETHER_HDR_LEN + ETHER_CRC_LEN
-			    + ETHER_VLAN_ENCAP_LEN;
-			ixl_init_locked(pf);
-			IXL_PF_UNLOCK(pf);
-		}
-		break;
-	case SIOCSIFFLAGS:
-		IOCTL_DEBUGOUT("ioctl: SIOCSIFFLAGS (Set Interface Flags)");
-		IXL_PF_LOCK(pf);
-		if (ifp->if_flags & IFF_UP) {
-			if ((ifp->if_drv_flags & IFF_DRV_RUNNING)) {
-				if ((ifp->if_flags ^ pf->if_flags) &
-				    (IFF_PROMISC | IFF_ALLMULTI)) {
-					ixl_set_promisc(vsi);
-				}
-			} else
-				ixl_init_locked(pf);
-		} else
-			if (ifp->if_drv_flags & IFF_DRV_RUNNING)
-				ixl_stop(pf);
-		pf->if_flags = ifp->if_flags;
-		IXL_PF_UNLOCK(pf);
-		break;
-	case SIOCADDMULTI:
-		IOCTL_DEBUGOUT("ioctl: SIOCADDMULTI");
-		if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
-			IXL_PF_LOCK(pf);
-			ixl_disable_intr(vsi);
-			ixl_add_multi(vsi);
-			ixl_enable_intr(vsi);
-			IXL_PF_UNLOCK(pf);
-		}
-		break;
-	case SIOCDELMULTI:
-		IOCTL_DEBUGOUT("ioctl: SIOCDELMULTI");
-		if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
-			IXL_PF_LOCK(pf);
-			ixl_disable_intr(vsi);
-			ixl_del_multi(vsi);
-			ixl_enable_intr(vsi);
-			IXL_PF_UNLOCK(pf);
-		}
-		break;
-	case SIOCSIFMEDIA:
-	case SIOCGIFMEDIA:
-		IOCTL_DEBUGOUT("ioctl: SIOCxIFMEDIA (Get/Set Interface Media)");
-		error = ifmedia_ioctl(ifp, ifr, &vsi->media, command);
-		break;
-	case SIOCSIFCAP:
-	{
-		int mask = ifr->ifr_reqcap ^ ifp->if_capenable;
-		IOCTL_DEBUGOUT("ioctl: SIOCSIFCAP (Set Capabilities)");
-
-		ixl_cap_txcsum_tso(vsi, ifp, mask);
-
-		if (mask & IFCAP_RXCSUM)
-			ifp->if_capenable ^= IFCAP_RXCSUM;
-		if (mask & IFCAP_RXCSUM_IPV6)
-			ifp->if_capenable ^= IFCAP_RXCSUM_IPV6;
-		if (mask & IFCAP_LRO)
-			ifp->if_capenable ^= IFCAP_LRO;
-		if (mask & IFCAP_VLAN_HWTAGGING)
-			ifp->if_capenable ^= IFCAP_VLAN_HWTAGGING;
-		if (mask & IFCAP_VLAN_HWFILTER)
-			ifp->if_capenable ^= IFCAP_VLAN_HWFILTER;
-		if (mask & IFCAP_VLAN_HWTSO)
-			ifp->if_capenable ^= IFCAP_VLAN_HWTSO;
-		if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
-			IXL_PF_LOCK(pf);
-			ixl_init_locked(pf);
-			IXL_PF_UNLOCK(pf);
-		}
-		VLAN_CAPABILITIES(ifp);
-
-		break;
-	}
-
-	default:
-		IOCTL_DEBUGOUT("ioctl: UNKNOWN (0x%X)\n", (int)command);
-		error = ether_ioctl(ifp, command, data);
-		break;
-	}
-
-	return (error);
+	vsi->max_frame_size = mtu + ETHER_HDR_LEN + ETHER_CRC_LEN +
+		ETHER_VLAN_ENCAP_LEN;
+	return (0);
 }
-
 
 /*********************************************************************
  *  Init entry point
@@ -1039,22 +854,21 @@ ixl_ioctl(struct ifnet * ifp, u_long command, caddr_t data)
  **********************************************************************/
 
 static void
-ixl_init_locked(struct ixl_pf *pf)
+ixl_if_init(if_shared_ctx_t sctx)
 {
+	struct ixl_vsi *vsi = DOWNCAST(sctx);
+	struct ixl_pf *pf = vsi->back;
+	device_t 	dev = sctx->isc_dev;
+
 	struct i40e_hw	*hw = &pf->hw;
-	struct ixl_vsi	*vsi = &pf->vsi;
-	struct ifnet	*ifp = vsi->ifp;
-	device_t 	dev = pf->dev;
 	struct i40e_filter_control_settings	filter;
 	u8		tmpaddr[ETHER_ADDR_LEN];
 	int		ret;
 
-	mtx_assert(&pf->pf_mtx, MA_OWNED);
 	INIT_DEBUGOUT("ixl_init: begin");
-	ixl_stop(pf);
 
 	/* Get the latest mac address... User might use a LAA */
-	bcopy(IF_LLADDR(vsi->ifp), tmpaddr,
+	bcopy(IF_LLADDR(sctx->isc_ifp), tmpaddr,
 	      I40E_ETH_LENGTH_OF_ADDRESS);
 	if (!cmp_etheraddr(hw->mac.addr, tmpaddr) && 
 	    i40e_validate_mac_addr(tmpaddr)) {
@@ -1069,15 +883,6 @@ ixl_init_locked(struct ixl_pf *pf)
 			return;
 		}
 	}
-
-	/* Set the various hardware offload abilities */
-	ifp->if_hwassist = 0;
-	if (ifp->if_capenable & IFCAP_TSO)
-		ifp->if_hwassist |= CSUM_TSO;
-	if (ifp->if_capenable & IFCAP_TXCSUM)
-		ifp->if_hwassist |= (CSUM_TCP | CSUM_UDP);
-	if (ifp->if_capenable & IFCAP_TXCSUM_IPV6)
-		ifp->if_hwassist |= (CSUM_TCP_IPV6 | CSUM_UDP_IPV6);
 
 	/* Set up the device filtering */
 	bzero(&filter, sizeof(filter));
@@ -1106,9 +911,6 @@ ixl_init_locked(struct ixl_pf *pf)
 	/* Setup vlan's if needed */
 	ixl_setup_vlan_filters(vsi);
 
-	/* Start the local timer */
-	callout_reset(&pf->timer, hz, ixl_local_timer, pf);
-
 	/* Set up MSI/X routing and the ITR settings */
 	if (ixl_enable_msix) {
 		ixl_configure_msix(pf);
@@ -1124,87 +926,26 @@ ixl_init_locked(struct ixl_pf *pf)
 	int aq_error = i40e_aq_set_mac_config(hw, vsi->max_frame_size,
 	    TRUE, 0, NULL);
 	if (aq_error)
-		device_printf(vsi->dev,
+		device_printf(dev,
 			"aq_set_mac_config in init error, code %d\n",
 		    aq_error);
-
-	/* And now turn on interrupts */
-	ixl_enable_intr(vsi);
-
-	/* Now inform the stack we're ready */
-	ifp->if_drv_flags |= IFF_DRV_RUNNING;
-	ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
-
-	return;
 }
-
-static void
-ixl_init(void *arg)
-{
-	struct ixl_pf *pf = arg;
-
-	IXL_PF_LOCK(pf);
-	ixl_init_locked(pf);
-	IXL_PF_UNLOCK(pf);
-	return;
-}
-
-/*
-**
-** MSIX Interrupt Handlers and Tasklets
-**
-*/
-static void
-ixl_handle_que(void *context, int pending)
-{
-	struct ixl_queue *que = context;
-	struct ixl_vsi *vsi = que->vsi;
-	struct i40e_hw  *hw = vsi->hw;
-	struct tx_ring  *txr = &que->txr;
-	struct ifnet    *ifp = vsi->ifp;
-	bool		more;
-
-	if (ifp->if_drv_flags & IFF_DRV_RUNNING) {
-		more = ixl_rxeof(que, IXL_RX_LIMIT);
-		IXL_TX_LOCK(txr);
-		ixl_txeof(que);
-		if (!drbr_empty(ifp, txr->br))
-			ixl_mq_start_locked(ifp, txr);
-		IXL_TX_UNLOCK(txr);
-		if (more) {
-			taskqueue_enqueue(que->tq, &que->task);
-			return;
-		}
-	}
-
-	/* Reenable this interrupt - hmmm */
-	ixl_enable_queue(hw, que->me);
-	return;
-}
-
 
 /*********************************************************************
  *
  *  Legacy Interrupt Service routine
  *
  **********************************************************************/
-void
+static int
 ixl_intr(void *arg)
 {
 	struct ixl_pf		*pf = arg;
 	struct i40e_hw		*hw =  &pf->hw;
 	struct ixl_vsi		*vsi = &pf->vsi;
 	struct ixl_queue	*que = vsi->queues;
-	struct ifnet		*ifp = vsi->ifp;
-	struct tx_ring		*txr = &que->txr;
-        u32			reg, icr0, mask;
-	bool			more_tx, more_rx;
-
+	u32			reg, icr0, mask;
+	
 	++que->irqs;
-
-	/* Protect against spurious interrupts */
-	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0)
-		return;
 
 	icr0 = rd32(hw, I40E_PFINT_ICR0);
 
@@ -1215,17 +956,9 @@ ixl_intr(void *arg)
         mask = rd32(hw, I40E_PFINT_ICR0_ENA);
 
 	if (icr0 & I40E_PFINT_ICR0_ADMINQ_MASK) {
-		taskqueue_enqueue(pf->tq, &pf->adminq);
-		return;
+		iflib_admin_intr_deferred(UPCAST(pf));
+		return (FILTER_HANDLED);
 	}
-
-	more_rx = ixl_rxeof(que, IXL_RX_LIMIT);
-
-	IXL_TX_LOCK(txr);
-	more_tx = ixl_txeof(que);
-	if (!drbr_empty(vsi->ifp, txr->br))
-		more_tx = 1;
-	IXL_TX_UNLOCK(txr);
 
 	/* re-enable other interrupt causes */
 	wr32(hw, I40E_PFINT_ICR0_ENA, mask);
@@ -1239,10 +972,7 @@ ixl_intr(void *arg)
 	reg |= I40E_QINT_TQCTL_CAUSE_ENA_MASK;
 	reg &= ~I40E_PFINT_ICR0_INTEVENT_MASK;
 	wr32(hw, I40E_QINT_TQCTL(0), reg);
-
-	ixl_enable_legacy(hw);
-
-	return;
+	return (FILTER_SCHEDULE_THREAD);
 }
 
 
@@ -1251,43 +981,15 @@ ixl_intr(void *arg)
  *  MSIX VSI Interrupt Service routine
  *
  **********************************************************************/
-void
+static int
 ixl_msix_que(void *arg)
 {
 	struct ixl_queue	*que = arg;
-	struct ixl_vsi	*vsi = que->vsi;
-	struct i40e_hw	*hw = vsi->hw;
-	struct tx_ring	*txr = &que->txr;
-	bool		more_tx, more_rx;
-
-	/* Protect against spurious interrupts */
-	if (!(vsi->ifp->if_drv_flags & IFF_DRV_RUNNING))
-		return;
-
-	++que->irqs;
-
-	more_rx = ixl_rxeof(que, IXL_RX_LIMIT);
-
-	IXL_TX_LOCK(txr);
-	more_tx = ixl_txeof(que);
-	/*
-	** Make certain that if the stack 
-	** has anything queued the task gets
-	** scheduled to handle it.
-	*/
-	if (!drbr_empty(vsi->ifp, txr->br))
-		more_tx = 1;
-	IXL_TX_UNLOCK(txr);
 
 	ixl_set_queue_rx_itr(que);
 	ixl_set_queue_tx_itr(que);
 
-	if (more_tx || more_rx)
-		taskqueue_enqueue(que->tq, &que->task);
-	else
-		ixl_enable_queue(hw, que->me);
-
-	return;
+	return (FILTER_SCHEDULE_THREAD);
 }
 
 
@@ -1296,7 +998,7 @@ ixl_msix_que(void *arg)
  *  MSIX Admin Queue Interrupt Service routine
  *
  **********************************************************************/
-static void
+static int
 ixl_msix_adminq(void *arg)
 {
 	struct ixl_pf	*pf = arg;
@@ -1324,8 +1026,8 @@ ixl_msix_adminq(void *arg)
 	reg = reg | I40E_PFINT_DYN_CTL0_CLEARPBA_MASK;
 	wr32(hw, I40E_PFINT_DYN_CTL0, reg);
 
-	taskqueue_enqueue(pf->tq, &pf->adminq);
-	return;
+	iflib_admin_intr_deferred(UPCAST(pf));
+	return (FILTER_HANDLED);
 }
 
 /*********************************************************************
@@ -1337,14 +1039,13 @@ ixl_msix_adminq(void *arg)
  *
  **********************************************************************/
 static void
-ixl_media_status(struct ifnet * ifp, struct ifmediareq * ifmr)
+ixl_if_media_status(if_shared_ctx_t sctx, struct ifmediareq * ifmr)
 {
-	struct ixl_vsi	*vsi = ifp->if_softc;
+	struct ixl_vsi	*vsi = DOWNCAST(sctx);
 	struct ixl_pf	*pf = (struct ixl_pf *)vsi->back;
 	struct i40e_hw  *hw = &pf->hw;
 
 	INIT_DEBUGOUT("ixl_media_status: begin");
-	IXL_PF_LOCK(pf);
 
 	ixl_update_link_status(pf);
 
@@ -1352,7 +1053,6 @@ ixl_media_status(struct ifnet * ifp, struct ifmediareq * ifmr)
 	ifmr->ifm_active = IFM_ETHER;
 
 	if (!vsi->link_up) {
-		IXL_PF_UNLOCK(pf);
 		return;
 	}
 
@@ -1424,9 +1124,6 @@ ixl_media_status(struct ifnet * ifp, struct ifmediareq * ifmr)
 	if (hw->phy.link_info.an_info & I40E_AQ_LINK_PAUSE_RX)
 		ifmr->ifm_active |= IFM_ETH_RXPAUSE;
 
-	IXL_PF_UNLOCK(pf);
-
-	return;
 }
 
 /*********************************************************************
@@ -1438,9 +1135,9 @@ ixl_media_status(struct ifnet * ifp, struct ifmediareq * ifmr)
  *
  **********************************************************************/
 static int
-ixl_media_change(struct ifnet * ifp)
+ixl_if_media_change(if_shared_ctx_t sctx)
 {
-	struct ixl_vsi *vsi = ifp->if_softc;
+	struct ixl_vsi *vsi = DOWNCAST(sctx);
 	struct ifmedia *ifm = &vsi->media;
 
 	INIT_DEBUGOUT("ixl_media_change: begin");
@@ -1448,8 +1145,7 @@ ixl_media_change(struct ifnet * ifp)
 	if (IFM_TYPE(ifm->ifm_media) != IFM_ETHER)
 		return (EINVAL);
 
-	if_printf(ifp, "Media change is currently not supported.\n");
-
+	if_printf(sctx->isc_ifp, "Media change is currently not supported.\n");
 	return (ENODEV);
 }
 
@@ -1465,6 +1161,7 @@ void
 ixl_atr(struct ixl_queue *que, struct tcphdr *th, int etype)
 {
 	struct ixl_vsi			*vsi = que->vsi;
+	if_shared_ctx_t sctx = UPCAST(vsi);
 	struct tx_ring			*txr = &que->txr;
 	struct i40e_filter_program_desc	*FDIR;
 	u32				ptype, dtype;
@@ -1486,7 +1183,7 @@ ixl_atr(struct ixl_queue *que, struct tcphdr *th, int etype)
 	/* Get a descriptor to use */
 	idx = txr->next_avail;
 	FDIR = (struct i40e_filter_program_desc *) &txr->base[idx];
-	if (++idx == que->num_desc)
+	if (++idx == sctx->isc_ntxd)
 		idx = 0;
 	txr->avail--;
 	txr->next_avail = idx;
@@ -1522,44 +1219,31 @@ ixl_atr(struct ixl_queue *que, struct tcphdr *th, int etype)
 
 	FDIR->qindex_flex_ptype_vsi = htole32(ptype);
 	FDIR->dtype_cmd_cntindex = htole32(dtype);
-	return;
 }
 #endif
 
-
-static void
-ixl_set_promisc(struct ixl_vsi *vsi)
+static int
+ixl_if_promisc_set(if_shared_ctx_t sctx, int flags)
 {
-	struct ifnet	*ifp = vsi->ifp;
+	struct ixl_vsi *vsi = DOWNCAST(sctx);
+	struct ifnet	*ifp = sctx->isc_ifp;
 	struct i40e_hw	*hw = vsi->hw;
-	int		err, mcnt = 0;
+	int		err;
 	bool		uni = FALSE, multi = FALSE;
 
-	if (ifp->if_flags & IFF_ALLMULTI)
-                multi = TRUE;
-	else { /* Need to count the multicast addresses */
-		struct  ifmultiaddr *ifma;
-		if_maddr_rlock(ifp);
-		TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
-                        if (ifma->ifma_addr->sa_family != AF_LINK)
-                                continue;
-                        if (mcnt == MAX_MULTICAST_ADDR)
-                                break;
-                        mcnt++;
-		}
-		if_maddr_runlock(ifp);
-	}
-
-	if (mcnt >= MAX_MULTICAST_ADDR)
-                multi = TRUE;
-        if (ifp->if_flags & IFF_PROMISC)
+	if (flags & IFF_ALLMULTI ||
+		if_multiaddr_count(ifp, MAX_MULTICAST_ADDR) == MAX_MULTICAST_ADDR)
+		multi = TRUE;
+	if (flags & IFF_PROMISC)
 		uni = TRUE;
 
 	err = i40e_aq_set_vsi_unicast_promiscuous(hw,
 	    vsi->seid, uni, NULL);
+	if (err)
+		return (err);
 	err = i40e_aq_set_vsi_multicast_promiscuous(hw,
 	    vsi->seid, multi, NULL);
-	return;
+	return (err);
 }
 
 /*********************************************************************
@@ -1569,91 +1253,63 @@ ixl_set_promisc(struct ixl_vsi *vsi)
  *
  *********************************************************************/
 static void
-ixl_add_multi(struct ixl_vsi *vsi)
+ixl_del_multi(struct ixl_vsi *vsi)
 {
-	struct	ifmultiaddr	*ifma;
-	struct ifnet		*ifp = vsi->ifp;
+	struct ixl_mac_filter	*f;
+	int			mcnt = 0;
+
+	IOCTL_DEBUGOUT("ixl_del_multi: begin");
+
+	SLIST_FOREACH(f, &vsi->ftl, next) {
+		if ((f->flags & (IXL_FILTER_USED|IXL_FILTER_MC)) == (IXL_FILTER_USED|IXL_FILTER_MC)){
+			f->flags |= IXL_FILTER_DEL;
+			mcnt++;
+		}
+	}
+	if (mcnt > 0)
+		ixl_del_hw_filters(vsi, mcnt);
+}
+
+static int
+ixl_mc_filter_apply(void *arg, struct ifmultiaddr *ifma)
+{
+	struct ixl_vsi *vsi = arg;
+
+	if (ifma->ifma_addr->sa_family != AF_LINK)
+		return (0);
+	ixl_add_mc_filter(vsi,
+					  (u8*)LLADDR((struct sockaddr_dl *) ifma->ifma_addr));
+	return (1);
+}
+
+static void
+ixl_if_multi_set(if_shared_ctx_t sctx)
+{
+	struct ixl_vsi *vsi = DOWNCAST(sctx);
 	struct i40e_hw		*hw = vsi->hw;
 	int			mcnt = 0, flags;
 
-	IOCTL_DEBUGOUT("ixl_add_multi: begin");
+	IOCTL_DEBUGOUT("ixl_if_multi_set: begin");
 
-	if_maddr_rlock(ifp);
-	/*
-	** First just get a count, to decide if we
-	** we simply use multicast promiscuous.
-	*/
-	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
-		if (ifma->ifma_addr->sa_family != AF_LINK)
-			continue;
-		mcnt++;
-	}
-	if_maddr_runlock(ifp);
+	mcnt = if_multiaddr_count(sctx->isc_ifp, MAX_MULTICAST_ADDR);
+	/* delete existing MC filters */
+	ixl_del_multi(vsi);
 
-	if (__predict_false(mcnt >= MAX_MULTICAST_ADDR)) {
-		/* delete existing MC filters */
-		ixl_del_hw_filters(vsi, mcnt);
+	if (__predict_false(mcnt == MAX_MULTICAST_ADDR)) {
 		i40e_aq_set_vsi_multicast_promiscuous(hw,
 		    vsi->seid, TRUE, NULL);
 		return;
 	}
-
-	mcnt = 0;
-	if_maddr_rlock(ifp);
-	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
-		if (ifma->ifma_addr->sa_family != AF_LINK)
-			continue;
-		ixl_add_mc_filter(vsi,
-		    (u8*)LLADDR((struct sockaddr_dl *) ifma->ifma_addr));
-		mcnt++;
-	}
-	if_maddr_runlock(ifp);
+	/* (re-)install filters for all mcast addresses */
+	mcnt = if_multi_apply(sctx->isc_ifp, ixl_mc_filter_apply, vsi);
+	
 	if (mcnt > 0) {
 		flags = (IXL_FILTER_ADD | IXL_FILTER_USED | IXL_FILTER_MC);
 		ixl_add_hw_filters(vsi, flags, mcnt);
 	}
 
-	IOCTL_DEBUGOUT("ixl_add_multi: end");
-	return;
+	IOCTL_DEBUGOUT("ixl_if_multi_set: end");
 }
-
-static void
-ixl_del_multi(struct ixl_vsi *vsi)
-{
-	struct ifnet		*ifp = vsi->ifp;
-	struct ifmultiaddr	*ifma;
-	struct ixl_mac_filter	*f;
-	int			mcnt = 0;
-	bool		match = FALSE;
-
-	IOCTL_DEBUGOUT("ixl_del_multi: begin");
-
-	/* Search for removed multicast addresses */
-	if_maddr_rlock(ifp);
-	SLIST_FOREACH(f, &vsi->ftl, next) {
-		if ((f->flags & IXL_FILTER_USED) && (f->flags & IXL_FILTER_MC)) {
-			match = FALSE;
-			TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
-				if (ifma->ifma_addr->sa_family != AF_LINK)
-					continue;
-				u8 *mc_addr = (u8 *)LLADDR((struct sockaddr_dl *)ifma->ifma_addr);
-				if (cmp_etheraddr(f->macaddr, mc_addr)) {
-					match = TRUE;
-					break;
-				}
-			}
-			if (match == FALSE) {
-				f->flags |= IXL_FILTER_DEL;
-				mcnt++;
-			}
-		}
-	}
-	if_maddr_runlock(ifp);
-
-	if (mcnt > 0)
-		ixl_del_hw_filters(vsi, mcnt);
-}
-
 
 /*********************************************************************
  *  Timer routine
@@ -1664,23 +1320,13 @@ ixl_del_multi(struct ixl_vsi *vsi)
  **********************************************************************/
 
 static void
-ixl_local_timer(void *arg)
+ixl_if_timer(if_shared_ctx_t sctx, uint16_t qid)
 {
-	struct ixl_pf		*pf = arg;
+	struct ixl_vsi		*vsi = DOWNCAST(sctx);
+	struct ixl_pf		*pf = vsi->back;
 	struct i40e_hw		*hw = &pf->hw;
-	struct ixl_vsi		*vsi = &pf->vsi;
-	struct ixl_queue	*que = vsi->queues;
-	device_t		dev = pf->dev;
-	int			hung = 0;
+	struct ixl_queue	*que = &vsi->queues[qid];
 	u32			mask;
-
-	mtx_assert(&pf->pf_mtx, MA_OWNED);
-
-	/* Fire off the adminq task */
-	taskqueue_enqueue(pf->tq, &pf->adminq);
-
-	/* Update stats */
-	ixl_update_stats_counters(pf);
 
 	/*
 	** Check status of the queues
@@ -1688,44 +1334,18 @@ ixl_local_timer(void *arg)
 	mask = (I40E_PFINT_DYN_CTLN_INTENA_MASK |
 		I40E_PFINT_DYN_CTLN_SWINT_TRIG_MASK);
  
-	for (int i = 0; i < vsi->num_queues; i++,que++) {
-		/* Any queues with outstanding work get a sw irq */
-		if (que->busy)
-			wr32(hw, I40E_PFINT_DYN_CTLN(que->me), mask);
-		/*
-		** Each time txeof runs without cleaning, but there
-		** are uncleaned descriptors it increments busy. If
-		** we get to 5 we declare it hung.
-		*/
-		if (que->busy == IXL_QUEUE_HUNG) {
-			++hung;
-			/* Mark the queue as inactive */
-			vsi->active_queues &= ~((u64)1 << que->me);
-			continue;
-		} else {
-			/* Check if we've come back from hung */
-			if ((vsi->active_queues & ((u64)1 << que->me)) == 0)
-				vsi->active_queues |= ((u64)1 << que->me);
-		}
-		if (que->busy >= IXL_MAX_TX_BUSY) {
-#ifdef IXL_DEBUG
-			device_printf(dev,"Warning queue %d "
-			    "appears to be hung!\n", i);
-#endif
-			que->busy = IXL_QUEUE_HUNG;
-			++hung;
-		}
-	}
-	/* Only reinit if all queues show hung */
-	if (hung == vsi->num_queues)
-		goto hung;
+	/* Any queues with outstanding work get a sw irq */
+	if (que->busy)
+		wr32(hw, I40E_PFINT_DYN_CTLN(que->me), mask);
 
-	callout_reset(&pf->timer, hz, ixl_local_timer, pf);
-	return;
+	if (qid != 0)
+		return;
 
-hung:
-	device_printf(dev, "Local Timer: HANG DETECT - Resetting!!\n");
-	ixl_init_locked(pf);
+	/* Fire off the adminq task */
+	taskqueue_enqueue(pf->tq, &pf->adminq);
+
+	/* Update stats */
+	ixl_update_stats_counters(pf);
 }
 
 /*
@@ -1738,7 +1358,6 @@ ixl_update_link_status(struct ixl_pf *pf)
 {
 	struct ixl_vsi		*vsi = &pf->vsi;
 	struct i40e_hw		*hw = &pf->hw;
-	struct ifnet		*ifp = vsi->ifp;
 	device_t		dev = pf->dev;
 
 
@@ -1762,18 +1381,16 @@ ixl_update_link_status(struct ixl_pf *pf)
 			   hw->phy.link_info.link_speed == I40E_LINK_SPEED_100MB))
 				device_printf(dev, "The partition detected link"
 				    "speed that is less than 10Gbps\n");
-			if_link_state_change(ifp, LINK_STATE_UP);
+			if_link_state_change(UPCAST(vsi)->isc_ifp, LINK_STATE_UP);
 		}
 	} else { /* Link down */
 		if (vsi->link_active == TRUE) {
 			if (bootverbose)
 				device_printf(dev,"Link is Down\n");
-			if_link_state_change(ifp, LINK_STATE_DOWN);
+			if_link_state_change(UPCAST(vsi)->isc_ifp, LINK_STATE_DOWN);
 			vsi->link_active = FALSE;
 		}
 	}
-
-	return;
 }
 
 /*********************************************************************
@@ -1784,26 +1401,13 @@ ixl_update_link_status(struct ixl_pf *pf)
  **********************************************************************/
 
 static void
-ixl_stop(struct ixl_pf *pf)
+ixl_if_stop(if_shared_ctx_t sctx)
 {
-	struct ixl_vsi	*vsi = &pf->vsi;
-	struct ifnet	*ifp = vsi->ifp;
+	struct ixl_vsi	*vsi = DOWNCAST(sctx);
 
-	mtx_assert(&pf->pf_mtx, MA_OWNED);
-
-	INIT_DEBUGOUT("ixl_stop: begin\n");
-	ixl_disable_intr(vsi);
+	INIT_DEBUGOUT("ixl_if_stop: begin\n");
 	ixl_disable_rings(vsi);
-
-	/* Tell the stack that the interface is no longer active */
-	ifp->if_drv_flags &= ~(IFF_DRV_RUNNING | IFF_DRV_OACTIVE);
-
-	/* Stop the local timer */
-	callout_stop(&pf->timer);
-
-	return;
 }
-
 
 /*********************************************************************
  *
@@ -1814,42 +1418,15 @@ static int
 ixl_assign_vsi_legacy(struct ixl_pf *pf)
 {
 	device_t        dev = pf->dev;
-	struct 		ixl_vsi *vsi = &pf->vsi;
-	struct		ixl_queue *que = vsi->queues;
 	int 		error, rid = 0;
-
+	
 	if (pf->msix == 1)
 		rid = 1;
-	pf->res = bus_alloc_resource_any(dev, SYS_RES_IRQ,
-	    &rid, RF_SHAREABLE | RF_ACTIVE);
-	if (pf->res == NULL) {
-		device_printf(dev,"Unable to allocate"
-		    " bus resource: vsi legacy/msi interrupt\n");
-		return (ENXIO);
-	}
-
-	/* Set the handler function */
-	error = bus_setup_intr(dev, pf->res,
-	    INTR_TYPE_NET | INTR_MPSAFE, NULL,
-	    ixl_intr, pf, &pf->tag);
+	error = iflib_legacy_setup(UPCAST(pf), ixl_intr, pf, &rid, "irq0");
 	if (error) {
-		pf->res = NULL;
 		device_printf(dev, "Failed to register legacy/msi handler");
 		return (error);
 	}
-	bus_describe_intr(dev, pf->res, pf->tag, "irq0");
-	TASK_INIT(&que->tx_task, 0, ixl_deferred_mq_start, que);
-	TASK_INIT(&que->task, 0, ixl_handle_que, que);
-	que->tq = taskqueue_create_fast("ixl_que", M_NOWAIT,
-	    taskqueue_thread_enqueue, &que->tq);
-	taskqueue_start_threads(&que->tq, 1, PI_NET, "%s que",
-	    device_get_nameunit(dev));
-	TASK_INIT(&pf->adminq, 0, ixl_do_adminq, pf);
-	pf->tq = taskqueue_create_fast("ixl_adm", M_NOWAIT,
-	    taskqueue_thread_enqueue, &pf->tq);
-	taskqueue_start_threads(&pf->tq, 1, PI_NET, "%s adminq",
-	    device_get_nameunit(dev));
-
 	return (0);
 }
 
@@ -1862,82 +1439,34 @@ ixl_assign_vsi_legacy(struct ixl_pf *pf)
 static int
 ixl_assign_vsi_msix(struct ixl_pf *pf)
 {
-	device_t	dev = pf->dev;
+	if_shared_ctx_t sctx = UPCAST(pf);
 	struct 		ixl_vsi *vsi = &pf->vsi;
 	struct 		ixl_queue *que = vsi->queues;
-	struct		tx_ring	 *txr;
-	int 		error, rid, vector = 0;
+	int 		err, rid, vector = 0;
 
 	/* Admin Que is vector 0*/
 	rid = vector + 1;
-	pf->res = bus_alloc_resource_any(dev,
-    	    SYS_RES_IRQ, &rid, RF_SHAREABLE | RF_ACTIVE);
-	if (!pf->res) {
-		device_printf(dev,"Unable to allocate"
-    	    " bus resource: Adminq interrupt [%d]\n", rid);
-		return (ENXIO);
+
+	err = iflib_irq_alloc_generic(sctx, &vsi->irq, rid, IFLIB_INTR_ADMIN,
+								  ixl_msix_adminq, pf, 0, "aq");
+	if (err) {
+		device_printf(sctx->isc_dev, "Failed to register Admin que handler");
+		return (err);
 	}
-	/* Set the adminq vector and handler */
-	error = bus_setup_intr(dev, pf->res,
-	    INTR_TYPE_NET | INTR_MPSAFE, NULL,
-	    ixl_msix_adminq, pf, &pf->tag);
-	if (error) {
-		pf->res = NULL;
-		device_printf(dev, "Failed to register Admin que handler");
-		return (error);
-	}
-	bus_describe_intr(dev, pf->res, pf->tag, "aq");
 	pf->admvec = vector;
 	/* Tasklet for Admin Queue */
-	TASK_INIT(&pf->adminq, 0, ixl_do_adminq, pf);
-	pf->tq = taskqueue_create_fast("ixl_adm", M_NOWAIT,
-	    taskqueue_thread_enqueue, &pf->tq);
-	taskqueue_start_threads(&pf->tq, 1, PI_NET, "%s adminq",
-	    device_get_nameunit(pf->dev));
 	++vector;
 
 	/* Now set up the stations */
 	for (int i = 0; i < vsi->num_queues; i++, vector++, que++) {
-		int cpu_id = i;
+		char buf[16];
 		rid = vector + 1;
-		txr = &que->txr;
-		que->res = bus_alloc_resource_any(dev, SYS_RES_IRQ, &rid,
-		    RF_SHAREABLE | RF_ACTIVE);
-		if (que->res == NULL) {
-			device_printf(dev,"Unable to allocate"
-		    	    " bus resource: que interrupt [%d]\n", vector);
-			return (ENXIO);
-		}
-		/* Set the handler function */
-		error = bus_setup_intr(dev, que->res,
-		    INTR_TYPE_NET | INTR_MPSAFE, NULL,
-		    ixl_msix_que, que, &que->tag);
-		if (error) {
-			que->res = NULL;
-			device_printf(dev, "Failed to register que handler");
-			return (error);
-		}
-		bus_describe_intr(dev, que->res, que->tag, "q%d", i);
-		/* Bind the vector to a CPU */
-#ifdef RSS
-		cpu_id = rss_getcpu(i % rss_getnumbuckets());
-#endif
-		bus_bind_intr(dev, que->res, cpu_id);
-		que->msix = vector;
-		TASK_INIT(&que->tx_task, 0, ixl_deferred_mq_start, que);
-		TASK_INIT(&que->task, 0, ixl_handle_que, que);
-		que->tq = taskqueue_create_fast("ixl_que", M_NOWAIT,
-		    taskqueue_thread_enqueue, &que->tq);
-#ifdef RSS
-		taskqueue_start_threads_pinned(&que->tq, 1, PI_NET,
-		    cpu_id, "%s (bucket %d)",
-		    device_get_nameunit(dev), cpu_id);
-#else
-		taskqueue_start_threads(&que->tq, 1, PI_NET,
-		    "%s que", device_get_nameunit(dev));
-#endif
-	}
 
+		snprintf(buf, sizeof(buf), "q%d", i);
+		err = iflib_irq_alloc_generic(UPCAST(vsi), &que->que_irq, rid, IFLIB_INTR_RX,
+									  ixl_msix_que, que, que->me, buf);
+		que->msix = vector;
+	}
 	return (0);
 }
 
@@ -2028,25 +1557,6 @@ ixl_init_msix(struct ixl_pf *pf)
 		    "Using MSIX interrupts with %d vectors\n", vectors);
 		pf->msix = vectors;
 		pf->vsi.num_queues = queues;
-#ifdef RSS
-		/*
-		 * If we're doing RSS, the number of queues needs to
-		 * match the number of RSS buckets that are configured.
-		 *
-		 * + If there's more queues than RSS buckets, we'll end
-		 *   up with queues that get no traffic.
-		 *
-		 * + If there's more RSS buckets than queues, we'll end
-		 *   up having multiple RSS buckets map to the same queue,
-		 *   so there'll be some contention.
-		 */
-		if (queues != rss_getnumbuckets()) {
-			device_printf(dev,
-			    "%s: queues (%d) != RSS buckets (%d)"
-			    "; performance will be impacted.\n",
-			    __func__, queues, rss_getnumbuckets());
-		}
-#endif
 		return (vectors);
 	}
 msi:
@@ -2301,7 +1811,6 @@ early:
 		bus_release_resource(dev, SYS_RES_MEMORY,
 		    PCIR_BAR(0), pf->pci_mem);
 
-	return;
 }
 
 static void
@@ -2354,58 +1863,40 @@ ixl_add_ifmedia(struct ixl_vsi *vsi, u32 phy_type)
 static int
 ixl_setup_interface(device_t dev, struct ixl_vsi *vsi)
 {
-	struct ifnet		*ifp;
-	struct i40e_hw		*hw = vsi->hw;
-	struct ixl_queue	*que = vsi->queues;
+	if_shared_ctx_t sctx = UPCAST(vsi);
+	struct ixl_pf *pf = vsi->back;
+	struct i40e_hw	*hw = &pf->hw;
+	struct ifnet		*ifp = sctx->isc_ifp;
 	struct i40e_aq_get_phy_abilities_resp abilities;
 	enum i40e_status_code aq_error = 0;
+	uint64_t cap;
+
 
 	INIT_DEBUGOUT("ixl_setup_interface: begin");
+	sctx->isc_q_align = PAGE_SIZE;/* max(DBA_ALIGN, PAGE_SIZE) */
 
-	ifp = vsi->ifp = if_alloc(IFT_ETHER);
-	if (ifp == NULL) {
-		device_printf(dev, "can not allocate ifnet structure\n");
-		return (-1);
-	}
-	if_initname(ifp, device_get_name(dev), device_get_unit(dev));
-	ifp->if_mtu = ETHERMTU;
-	ifp->if_baudrate = 4000000000;  // ??
-	ifp->if_init = ixl_init;
-	ifp->if_softc = vsi;
-	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
-	ifp->if_ioctl = ixl_ioctl;
+	sctx->isc_tx_maxsize = IXL_TSO_SIZE;
+	sctx->isc_tx_nsegments = IXL_MAX_TX_SEGS;
+	sctx->isc_tx_maxsegsize = PAGE_SIZE*4;
 
-#if __FreeBSD_version >= 1100036
-	if_setgetcounterfn(ifp, ixl_get_counter);
-#endif
+	sctx->isc_rx_maxsize = PAGE_SIZE*4;
+	sctx->isc_rx_nsegments = 1;
+	sctx->isc_rx_maxsegsize = PAGE_SIZE*4;
 
-	ifp->if_transmit = ixl_mq_start;
+	sctx->isc_nqsets = vsi->num_queues;
 
-	ifp->if_qflush = ixl_qflush;
+	/* initialize fast path functions */
+	ixl_txrx_init(sctx);
 
-	ifp->if_snd.ifq_maxlen = que->num_desc - 2;
+	cap = IFCAP_HWCSUM | IFCAP_HWCSUM_IPV6 | IFCAP_LRO | IFCAP_JUMBO_MTU; /* IFCAP_TSO | */
+	cap |= IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWTSO | IFCAP_VLAN_MTU | IFCAP_VLAN_HWCSUM;
+	if_setifheaderlen(ifp, sizeof(struct ether_vlan_header));
+	if_setcapabilitiesbit(ifp, cap, 0);
+	if_setcapenable(ifp, if_getcapabilities(ifp));
 
 	vsi->max_frame_size =
 	    ifp->if_mtu + ETHER_HDR_LEN + ETHER_CRC_LEN
 	    + ETHER_VLAN_ENCAP_LEN;
-
-	/*
-	 * Tell the upper layer(s) we support long frames.
-	 */
-	ifp->if_hdrlen = sizeof(struct ether_vlan_header);
-
-	ifp->if_capabilities |= IFCAP_HWCSUM;
-	ifp->if_capabilities |= IFCAP_HWCSUM_IPV6;
-	ifp->if_capabilities |= IFCAP_TSO;
-	ifp->if_capabilities |= IFCAP_JUMBO_MTU;
-	ifp->if_capabilities |= IFCAP_LRO;
-
-	/* VLAN capabilties */
-	ifp->if_capabilities |= IFCAP_VLAN_HWTAGGING
-			     |  IFCAP_VLAN_HWTSO
-			     |  IFCAP_VLAN_MTU
-			     |  IFCAP_VLAN_HWCSUM;
-	ifp->if_capenable = ifp->if_capabilities;
 
 	/*
 	** Don't turn this on by default, if vlans are
@@ -2416,13 +1907,6 @@ ixl_setup_interface(device_t dev, struct ixl_vsi *vsi)
 	** enable this and get full hardware tag filtering.
 	*/
 	ifp->if_capabilities |= IFCAP_VLAN_HWFILTER;
-
-	/*
-	 * Specify the media types supported by this adapter and register
-	 * callbacks to update media and link information
-	 */
-	ifmedia_init(&vsi->media, IFM_IMASK, ixl_media_change,
-		     ixl_media_status);
 
 	aq_error = i40e_aq_get_phy_capabilities(hw,
 	    FALSE, TRUE, &abilities, NULL);
@@ -2447,8 +1931,6 @@ ixl_setup_interface(device_t dev, struct ixl_vsi *vsi)
 	/* Use autoselect media by default */
 	ifmedia_add(&vsi->media, IFM_ETHER | IFM_AUTO, 0, NULL);
 	ifmedia_set(&vsi->media, IFM_ETHER | IFM_AUTO);
-
-	ether_ifattach(ifp, hw->mac.addr);
 
 	return (0);
 }
@@ -2478,7 +1960,7 @@ ixl_switch_config(struct ixl_pf *pf)
 {
 	struct i40e_hw	*hw = &pf->hw; 
 	struct ixl_vsi	*vsi = &pf->vsi;
-	device_t 	dev = vsi->dev;
+	device_t 	dev = vsi->hwdev;
 	struct i40e_aqc_get_switch_config_resp *sw_config;
 	u8	aq_buf[I40E_AQ_LARGE_BUF];
 	int	ret = I40E_SUCCESS;
@@ -2516,11 +1998,13 @@ ixl_switch_config(struct ixl_pf *pf)
 static int
 ixl_initialize_vsi(struct ixl_vsi *vsi)
 {
+	if_shared_ctx_t sctx = UPCAST(vsi);
 	struct ixl_queue	*que = vsi->queues;
-	device_t		dev = vsi->dev;
+	device_t		dev = vsi->hwdev;
 	struct i40e_hw		*hw = vsi->hw;
 	struct i40e_vsi_context	ctxt;
 	int			err = 0;
+	struct ifnet *ifp = UPCAST(vsi)->isc_ifp;
 
 	memset(&ctxt, 0, sizeof(ctxt));
 	ctxt.seid = vsi->seid;
@@ -2552,7 +2036,7 @@ ixl_initialize_vsi(struct ixl_vsi *vsi)
 	/* Set VLAN receive stripping mode */
 	ctxt.info.valid_sections |= I40E_AQ_VSI_PROP_VLAN_VALID;
 	ctxt.info.port_vlan_flags = I40E_AQ_VSI_PVLAN_MODE_ALL;
-	if (vsi->ifp->if_capenable & IFCAP_VLAN_HWTAGGING)
+	if (ifp->if_capenable & IFCAP_VLAN_HWTAGGING)
 	    ctxt.info.port_vlan_flags |= I40E_AQ_VSI_PVLAN_EMOD_STR_BOTH;
 	else
 	    ctxt.info.port_vlan_flags |= I40E_AQ_VSI_PVLAN_EMOD_NOTHING;
@@ -2582,17 +2066,17 @@ ixl_initialize_vsi(struct ixl_vsi *vsi)
 
 
 		/* Setup the HMC TX Context  */
-		size = que->num_desc * sizeof(struct i40e_tx_desc);
+		size = sctx->isc_ntxd * sizeof(struct i40e_tx_desc);
 		memset(&tctx, 0, sizeof(struct i40e_hmc_obj_txq));
 		tctx.new_context = 1;
-		tctx.base = (txr->dma.pa/128);
-		tctx.qlen = que->num_desc;
+		tctx.base = (txr->tx_paddr/128);
+		tctx.qlen = sctx->isc_ntxd;
 		tctx.fc_ena = 0;
 		tctx.rdylist = vsi->info.qs_handle[0]; /* index is TC */
 		/* Enable HEAD writeback */
 		tctx.head_wb_ena = 1;
-		tctx.head_wb_addr = txr->dma.pa +
-		    (que->num_desc * sizeof(struct i40e_tx_desc));
+		tctx.head_wb_addr = txr->tx_paddr +
+		    (sctx->isc_ntxd * sizeof(struct i40e_tx_desc));
 		tctx.rdylist_act = 0;
 		err = i40e_clear_lan_tx_queue_context(hw, i);
 		if (err) {
@@ -2632,8 +2116,8 @@ ixl_initialize_vsi(struct ixl_vsi *vsi)
 		rctx.dtype = 0;
 		rctx.dsize = 1;	/* do 32byte descriptors */
 		rctx.hsplit_0 = 0;  /* no HDR split initially */
-		rctx.base = (rxr->dma.pa/128);
-		rctx.qlen = que->num_desc;
+		rctx.base = (rxr->rx_paddr/128);
+		rctx.qlen = sctx->isc_nrxd;
 		rctx.tphrdesc_ena = 1;
 		rctx.tphwdesc_ena = 1;
 		rctx.tphdata_ena = 0;
@@ -2662,7 +2146,7 @@ ixl_initialize_vsi(struct ixl_vsi *vsi)
 			break;
 		}
 		wr32(vsi->hw, I40E_QRX_TAIL(que->me), 0);
-		wr32(vsi->hw, I40E_QRX_TAIL(que->me), que->num_desc - 1);
+		wr32(vsi->hw, I40E_QRX_TAIL(que->me), sctx->isc_nrxd - 1);
 	}
 	return (err);
 }
@@ -2676,34 +2160,8 @@ ixl_initialize_vsi(struct ixl_vsi *vsi)
 void
 ixl_free_vsi(struct ixl_vsi *vsi)
 {
-	struct ixl_pf		*pf = (struct ixl_pf *)vsi->back;
-	struct ixl_queue	*que = vsi->queues;
 	struct ixl_mac_filter *f;
 
-	/* Free station queues */
-	for (int i = 0; i < vsi->num_queues; i++, que++) {
-		struct tx_ring *txr = &que->txr;
-		struct rx_ring *rxr = &que->rxr;
-	
-		if (!mtx_initialized(&txr->mtx)) /* uninitialized */
-			continue;
-		IXL_TX_LOCK(txr);
-		ixl_free_que_tx(que);
-		if (txr->base)
-			i40e_free_dma_mem(&pf->hw, &txr->dma);
-		IXL_TX_UNLOCK(txr);
-		IXL_TX_LOCK_DESTROY(txr);
-
-		if (!mtx_initialized(&rxr->mtx)) /* uninitialized */
-			continue;
-		IXL_RX_LOCK(rxr);
-		ixl_free_que_rx(que);
-		if (rxr->base)
-			i40e_free_dma_mem(&pf->hw, &rxr->dma);
-		IXL_RX_UNLOCK(rxr);
-		IXL_RX_LOCK_DESTROY(rxr);
-		
-	}
 	free(vsi->queues, M_DEVBUF);
 
 	/* Free VSI filter list */
@@ -2726,31 +2184,43 @@ static int
 ixl_setup_stations(struct ixl_pf *pf)
 {
 	device_t		dev = pf->dev;
-	struct ixl_vsi		*vsi;
+	struct ixl_vsi		*vsi = &pf->vsi;
+	if_shared_ctx_t sctx = UPCAST(vsi);
 	struct ixl_queue	*que;
 	struct tx_ring		*txr;
 	struct rx_ring		*rxr;
 	int 			rsize, tsize;
 	int			error = I40E_SUCCESS;
+	uint32_t qsizes[2];
 
-	vsi = &pf->vsi;
 	vsi->back = (void *)pf;
 	vsi->hw = &pf->hw;
 	vsi->id = 0;
 	vsi->num_vlans = 0;
 
+	tsize = roundup2((ixl_ringsz * sizeof(struct i40e_tx_desc)) +
+					 sizeof(u32), DBA_ALIGN);
+	rsize = roundup2(ixl_ringsz *
+					 sizeof(union i40e_rx_desc), DBA_ALIGN);
+	qsizes[0] = tsize;
+	qsizes[1] = rsize;
+	
 	/* Get memory for the station queues */
-        if (!(vsi->queues =
-            (struct ixl_queue *) malloc(sizeof(struct ixl_queue) *
-            vsi->num_queues, M_DEVBUF, M_NOWAIT | M_ZERO))) {
-                device_printf(dev, "Unable to allocate queue memory\n");
-                error = ENOMEM;
-                goto early;
-        }
+	if (iflib_queues_alloc(sctx, qsizes, 2)) {
+		device_printf(dev, "Unable to allocate queue memory\n");
+		error = ENOMEM;
+		goto early;
+	}
+	 if (!(vsi->queues =
+		   (struct ixl_queue *) malloc(sizeof(struct ixl_queue) *
+									   ixl_ringsz, M_DEVBUF, M_NOWAIT | M_ZERO))) {
+		 device_printf(dev, "Unable to allocate queue memory\n");
+		 error = ENOMEM;
+		 goto early;
+	 }
 
 	for (int i = 0; i < vsi->num_queues; i++) {
 		que = &vsi->queues[i];
-		que->num_desc = ixl_ringsz;
 		que->me = i;
 		que->vsi = vsi;
 		/* mark the queue as active */
@@ -2759,85 +2229,13 @@ ixl_setup_stations(struct ixl_pf *pf)
 		txr->que = que;
 		txr->tail = I40E_QTX_TAIL(que->me);
 
-		/* Initialize the TX lock */
-		snprintf(txr->mtx_name, sizeof(txr->mtx_name), "%s:tx(%d)",
-		    device_get_nameunit(dev), que->me);
-		mtx_init(&txr->mtx, txr->mtx_name, NULL, MTX_DEF);
-		/* Create the TX descriptor ring */
-		tsize = roundup2((que->num_desc *
-		    sizeof(struct i40e_tx_desc)) +
-		    sizeof(u32), DBA_ALIGN);
-		if (i40e_allocate_dma_mem(&pf->hw,
-		    &txr->dma, i40e_mem_reserved, tsize, DBA_ALIGN)) {
-			device_printf(dev,
-			    "Unable to allocate TX Descriptor memory\n");
-			error = ENOMEM;
-			goto fail;
-		}
-		txr->base = (struct i40e_tx_desc *)txr->dma.va;
-		bzero((void *)txr->base, tsize);
-       		/* Now allocate transmit soft structs for the ring */
-       		if (ixl_allocate_tx_data(que)) {
-			device_printf(dev,
-			    "Critical Failure setting up TX structures\n");
-			error = ENOMEM;
-			goto fail;
-       		}
-		/* Allocate a buf ring */
-		txr->br = buf_ring_alloc(4096, M_DEVBUF,
-		    M_WAITOK, &txr->mtx);
-		if (txr->br == NULL) {
-			device_printf(dev,
-			    "Critical Failure setting up TX buf ring\n");
-			error = ENOMEM;
-			goto fail;
-       		}
-
-		/*
-		 * Next the RX queues...
-		 */ 
-		rsize = roundup2(que->num_desc *
-		    sizeof(union i40e_rx_desc), DBA_ALIGN);
 		rxr = &que->rxr;
 		rxr->que = que;
 		rxr->tail = I40E_QRX_TAIL(que->me);
 
-		/* Initialize the RX side lock */
-		snprintf(rxr->mtx_name, sizeof(rxr->mtx_name), "%s:rx(%d)",
-		    device_get_nameunit(dev), que->me);
-		mtx_init(&rxr->mtx, rxr->mtx_name, NULL, MTX_DEF);
-
-		if (i40e_allocate_dma_mem(&pf->hw,
-		    &rxr->dma, i40e_mem_reserved, rsize, 4096)) {
-			device_printf(dev,
-			    "Unable to allocate RX Descriptor memory\n");
-			error = ENOMEM;
-			goto fail;
-		}
-		rxr->base = (union i40e_rx_desc *)rxr->dma.va;
-		bzero((void *)rxr->base, rsize);
-
-        	/* Allocate receive soft structs for the ring*/
-		if (ixl_allocate_rx_data(que)) {
-			device_printf(dev,
-			    "Critical Failure setting up receive structs\n");
-			error = ENOMEM;
-			goto fail;
-		}
 	}
 
 	return (0);
-
-fail:
-	for (int i = 0; i < vsi->num_queues; i++) {
-		que = &vsi->queues[i];
-		rxr = &que->rxr;
-		txr = &que->txr;
-		if (rxr->base)
-			i40e_free_dma_mem(&pf->hw, &rxr->dma);
-		if (txr->base)
-			i40e_free_dma_mem(&pf->hw, &txr->dma);
-	}
 
 early:
 	return (error);
@@ -2913,7 +2311,6 @@ ixl_set_queue_rx_itr(struct ixl_queue *que)
 	}
 	rxr->bytes = 0;
 	rxr->packets = 0;
-	return;
 }
 
 
@@ -2987,7 +2384,6 @@ ixl_set_queue_tx_itr(struct ixl_queue *que)
 	}
 	txr->bytes = 0;
 	txr->packets = 0;
-	return;
 }
 
 
@@ -3271,22 +2667,16 @@ static void ixl_config_rss(struct ixl_vsi *vsi)
 ** repopulate the real table.
 */
 static void
-ixl_register_vlan(void *arg, struct ifnet *ifp, u16 vtag)
+ixl_if_vlan_register(if_shared_ctx_t sctx, u16 vtag)
 {
-	struct ixl_vsi	*vsi = ifp->if_softc;
+	struct ixl_vsi	*vsi = DOWNCAST(sctx);
 	struct i40e_hw	*hw = vsi->hw;
-	struct ixl_pf	*pf = (struct ixl_pf *)vsi->back;
-
-	if (ifp->if_softc !=  arg)   /* Not our event */
-		return;
 
 	if ((vtag == 0) || (vtag > 4095))	/* Invalid */
 		return;
 
-	IXL_PF_LOCK(pf);
 	++vsi->num_vlans;
 	ixl_add_filter(vsi, hw->mac.addr, vtag);
-	IXL_PF_UNLOCK(pf);
 }
 
 /*
@@ -3295,22 +2685,17 @@ ixl_register_vlan(void *arg, struct ifnet *ifp, u16 vtag)
 ** in the soft vfta.
 */
 static void
-ixl_unregister_vlan(void *arg, struct ifnet *ifp, u16 vtag)
+ixl_if_vlan_unregister(if_shared_ctx_t sctx, u16 vtag)
 {
-	struct ixl_vsi	*vsi = ifp->if_softc;
+	struct ixl_vsi	*vsi = DOWNCAST(sctx);
 	struct i40e_hw	*hw = vsi->hw;
-	struct ixl_pf	*pf = (struct ixl_pf *)vsi->back;
 
-	if (ifp->if_softc !=  arg)
-		return;
 
 	if ((vtag == 0) || (vtag > 4095))	/* Invalid */
 		return;
 
-	IXL_PF_LOCK(pf);
 	--vsi->num_vlans;
 	ixl_del_filter(vsi, hw->mac.addr, vtag);
-	IXL_PF_UNLOCK(pf);
 }
 
 /*
@@ -3346,7 +2731,6 @@ ixl_setup_vlan_filters(struct ixl_vsi *vsi)
 	flags = IXL_FILTER_VLAN;
 	flags |= (IXL_FILTER_ADD | IXL_FILTER_USED);
 	ixl_add_hw_filters(vsi, flags, cnt);
-	return;
 }
 
 /*
@@ -3383,8 +2767,6 @@ ixl_add_mc_filter(struct ixl_vsi *vsi, u8 *macaddr)
 	f->vlan = IXL_VLAN_ANY;
 	f->flags |= (IXL_FILTER_ADD | IXL_FILTER_USED
 	    | IXL_FILTER_MC);
-
-	return;
 }
 
 /*
@@ -3394,7 +2776,6 @@ static void
 ixl_add_filter(struct ixl_vsi *vsi, u8 *macaddr, s16 vlan)
 {
 	struct ixl_mac_filter	*f, *tmp;
-	device_t		dev = vsi->dev;
 
 	DEBUGOUT("ixl_add_filter: begin");
 
@@ -3417,7 +2798,7 @@ ixl_add_filter(struct ixl_vsi *vsi, u8 *macaddr, s16 vlan)
 
 	f = ixl_get_filter(vsi);
 	if (f == NULL) {
-		device_printf(dev, "WARNING: no filter available!!\n");
+		device_printf(UPCAST(vsi)->isc_dev, "WARNING: no filter available!!\n");
 		return;
 	}
 	bcopy(macaddr, f->macaddr, ETHER_ADDR_LEN);
@@ -3485,7 +2866,7 @@ ixl_add_hw_filters(struct ixl_vsi *vsi, int flags, int cnt)
 	struct i40e_aqc_add_macvlan_element_data *a, *b;
 	struct ixl_mac_filter	*f;
 	struct i40e_hw	*hw = vsi->hw;
-	device_t	dev = vsi->dev;
+	device_t	dev = UPCAST(vsi)->isc_dev;
 	int		err, j = 0;
 
 	a = malloc(sizeof(struct i40e_aqc_add_macvlan_element_data) * cnt,
@@ -3535,7 +2916,7 @@ ixl_del_hw_filters(struct ixl_vsi *vsi, int cnt)
 {
 	struct i40e_aqc_remove_macvlan_element_data *d, *e;
 	struct i40e_hw		*hw = vsi->hw;
-	device_t		dev = vsi->dev;
+	device_t		dev = UPCAST(vsi)->isc_dev;
 	struct ixl_mac_filter	*f, *f_temp;
 	int			err, j = 0;
 
@@ -3622,6 +3003,31 @@ ixl_enable_rings(struct ixl_vsi *vsi)
 		if ((reg & I40E_QRX_ENA_QENA_STAT_MASK) == 0)
 			printf("RX queue %d disabled!\n", i);
 	}
+}
+
+static void
+ixl_if_intr_enable(if_shared_ctx_t sctx)
+{
+	struct ixl_vsi	*vsi = DOWNCAST(sctx);
+
+	ixl_enable_intr(vsi);
+}
+
+static void
+ixl_if_intr_disable(if_shared_ctx_t sctx)
+{
+	struct ixl_vsi	*vsi = DOWNCAST(sctx);
+
+	ixl_disable_intr(vsi);
+}
+
+static void
+ixl_if_rx_intr_enable(if_shared_ctx_t sctx, uint16_t rxqid)
+{
+	struct ixl_vsi	*vsi = DOWNCAST(sctx);
+	struct ixl_queue *que = &vsi->queues[rxqid];
+
+	ixl_enable_queue(vsi->hw, que->me);
 }
 
 static void
@@ -4007,11 +3413,11 @@ ixl_update_stats_counters(struct ixl_pf *pf)
 **  - do outside interrupt since it might sleep
 */
 static void
-ixl_do_adminq(void *context, int pending)
+ixl_if_update_admin_status(if_shared_ctx_t sctx)
 {
-	struct ixl_pf			*pf = context;
+	struct ixl_vsi			*vsi = DOWNCAST(sctx);
+	struct ixl_pf			*pf = vsi->back; 
 	struct i40e_hw			*hw = &pf->hw;
-	struct ixl_vsi			*vsi = &pf->vsi;
 	struct i40e_arq_event_info	event;
 	i40e_status			ret;
 	u32				reg, loop = 0;
@@ -4093,7 +3499,6 @@ ixl_print_debug_info(struct ixl_pf *pf)
 
 	printf("Queue irqs = %jx\n", (uintmax_t)que->irqs);
 	printf("AdminQ irqs = %jx\n", (uintmax_t)pf->admin_irq);
-	printf("RX next check = %x\n", rxr->next_check);
 	printf("RX not ready = %jx\n", (uintmax_t)rxr->not_done);
 	printf("RX packets = %jx\n", (uintmax_t)rxr->rx_packets);
 	printf("TX desc avail = %x\n", txr->avail);
@@ -4135,7 +3540,6 @@ void ixl_update_eth_stats(struct ixl_vsi *vsi)
 	struct i40e_hw *hw = &pf->hw;
 	struct i40e_eth_stats *es;
 	struct i40e_eth_stats *oes;
-	int i;
 	uint64_t tx_discards;
 	struct i40e_hw_port_stats *nsd;
 	u16 stat_idx = vsi->info.stat_counter_idx;
@@ -4188,8 +3592,6 @@ void ixl_update_eth_stats(struct ixl_vsi *vsi)
 	vsi->stat_offsets_loaded = true;
 
 	tx_discards = es->tx_discards + nsd->tx_dropped_link_down;
-	for (i = 0; i < vsi->num_queues; i++)
-		tx_discards += vsi->queues[i].txr.br->br_drops;
 
 	/* Update ifnet stats */
 	IXL_SET_IPACKETS(vsi, es->rx_unicast +
@@ -4435,10 +3837,7 @@ ixl_set_advertised_speeds(struct ixl_pf *pf, int speeds)
 	** This seems a bit heavy handed, but we
 	** need to get a reinit on some devices
 	*/
-	IXL_PF_LOCK(pf);
-	ixl_stop(pf);
-	ixl_init_locked(pf);
-	IXL_PF_UNLOCK(pf);
+	iflib_init(UPCAST(pf));
 
 	return (0);
 }
