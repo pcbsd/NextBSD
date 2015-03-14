@@ -117,7 +117,7 @@ METHOD int queues_alloc {
 	if_shared_ctx_t _ctx;
 };
 
-METHOD void qset_structures_free {
+METHOD void queues_free {
 	if_shared_ctx_t _ctx;
 };
 
@@ -171,7 +171,7 @@ METHOD void media_set{
 	if_shared_ctx_t _ctx;
 } DEFAULT null_void_op;
 
-METHOD void promisc_set {
+METHOD int promisc_set {
 	if_shared_ctx_t _ctx;
 	int _flags;
 };
@@ -180,7 +180,7 @@ METHOD void promisc_set {
 # Device status
 #
 
-METHOD void update_link_status {
+METHOD void update_admin_status {
 	if_shared_ctx_t _ctx;
 };
 

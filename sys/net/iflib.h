@@ -145,7 +145,7 @@ struct if_shared_ctx {
 typedef enum {
 	IFLIB_INTR_TX,
 	IFLIB_INTR_RX,
-	IFLIB_INTR_LINK,
+	IFLIB_INTR_ADMIN,
 } intr_type_t;
 
 #define UPCAST(sc) ((if_shared_ctx_t)(sc))
@@ -175,14 +175,14 @@ int iflib_irq_alloc_generic(if_shared_ctx_t ctx, if_irq_t irq, int rid,
 							intr_type_t type, driver_filter_t *filter,
 							void *filter_arg, int qid, char *name);
 
-int iflib_legacy_setup(if_shared_ctx_t sctx, driver_filter_t filter, int *rid);
+int iflib_legacy_setup(if_shared_ctx_t sctx, driver_filter_t filter, void *filterarg, int *rid, char *str);
 void iflib_led_create(if_shared_ctx_t sctx);
 
 void iflib_init(if_shared_ctx_t sctx);
 
 void iflib_tx_intr_deferred(if_shared_ctx_t sctx, int txqid);
 void iflib_rx_intr_deferred(if_shared_ctx_t sctx, int rxqid);
-void iflib_link_intr_deferred(if_shared_ctx_t sctx);
+void iflib_admin_intr_deferred(if_shared_ctx_t sctx);
 
 void iflib_link_state_change(if_shared_ctx_t sctx, uint64_t baudrate, int linkstate);
 
