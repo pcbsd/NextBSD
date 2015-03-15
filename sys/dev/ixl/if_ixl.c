@@ -1641,10 +1641,8 @@ ixl_configure_legacy(struct ixl_pf *pf)
 	struct i40e_hw	*hw = &pf->hw;
 	u32		reg;
 
-
 	wr32(hw, I40E_PFINT_ITR0(0), 0);
 	wr32(hw, I40E_PFINT_ITR0(1), 0);
-
 
 	/* Setup "other" causes */
 	reg = I40E_PFINT_ICR0_ENA_ECC_ERR_MASK

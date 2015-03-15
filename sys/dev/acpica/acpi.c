@@ -209,6 +209,7 @@ static device_method_t acpi_methods[] = {
     DEVMETHOD(bus_setup_intr,		bus_generic_setup_intr),
     DEVMETHOD(bus_teardown_intr,	bus_generic_teardown_intr),
     DEVMETHOD(bus_hint_device_unit,	acpi_hint_device_unit),
+    DEVMETHOD(bus_get_cpus,		acpi_get_cpus),
     DEVMETHOD(bus_get_domain,		acpi_get_domain),
 
     /* ACPI bus */
@@ -1071,7 +1072,57 @@ acpi_hint_device_unit(device_t acdev, device_t child, const char *name,
 }
 
 /*
- * Fech the NUMA domain for the given device.
+ * Fetch the NUMA domain for a device by mapping the value returned by
+ * _PXM to a NUMA domain.  If the device does not have a _PXM method,
+ * -2 is returned.  If any other error occurs, -1 is returned.
+ */
+static int
+acpi_parse_pxm(device_t dev, int *domainid)
+{
+#if MAXMEMDOM > 1
+	ACPI_HANDLE handle;
+	ACPI_STATUS status;
+	int pxm;
+
+	handle = acpi_get_handle(dev);
+	if (handle == NULL)
+		return (ENOENT);
+	status = acpi_GetInteger(handle, "_PXM", &pxm);
+	if (ACPI_SUCCESS(status)) {
+		*domainid = acpi_map_pxm_to_vm_domainid(pxm);
+		return (0);
+	}
+	if (status == AE_NOT_FOUND)
+		return (ENOATTR);
+#endif
+	return (ENOENT);
+}
+
+int
+acpi_get_cpus(device_t dev, device_t child, enum cpu_sets op, cpuset_t *cpuset)
+{
+	int rc, d, error;
+
+	rc = acpi_parse_pxm(child, &d);
+	if (rc != 0)
+		return (bus_generic_get_cpus(dev, child, op, cpuset));
+
+	switch (op) {
+	case LOCAL_CPUS:
+		*cpuset = cpuset_domain[d];
+		return (0);
+	case INTR_CPUS:
+		if ((error = bus_generic_get_cpus(dev, child, op, cpuset)))
+			return (error);
+		CPU_AND(cpuset, &cpuset_domain[d]);
+		return (0);
+	default:
+		return (bus_generic_get_cpus(dev, child, op, cpuset));
+	}
+}
+
+/*
+ * Fetch the NUMA domain for the given device.
  *
  * If a device has a _PXM method, map that to a NUMA domain.
  *
@@ -1081,22 +1132,15 @@ acpi_hint_device_unit(device_t acdev, device_t child, const char *name,
 int
 acpi_get_domain(device_t dev, device_t child, int *domain)
 {
-#if MAXMEMDOM > 1
-	ACPI_HANDLE h;
-	int d, pxm;
+	int rc, d;
 
-	h = acpi_get_handle(child);
-	if ((h != NULL) &&
-	    ACPI_SUCCESS(acpi_GetInteger(h, "_PXM", &pxm))) {
-		d = acpi_map_pxm_to_vm_domainid(pxm);
-		if (d < 0)
-			return (ENOENT);
+	rc = acpi_parse_pxm(child, &d);
+	if (rc == 0)
 		*domain = d;
-		return (0);
-	}
-#endif
-	/* No _PXM node; go up a level */
-	return (bus_generic_get_domain(dev, child, domain));
+	else if (rc == ENOATTR) /* No _PXM node; go up a level */
+		return (bus_generic_get_domain(dev, child, domain));
+
+	return (rc);
 }
 
 /*
