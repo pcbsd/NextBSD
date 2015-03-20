@@ -67,12 +67,8 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	${_liblaunch} \
 	${_libldns} \
 	liblzma \
-<<<<<<< HEAD
 	${_libmach} \
 	libmagic \
-=======
-	${_libmagic} \
->>>>>>> 93ad9da2c42ed829200f58c8fa74764daf177cde
 	libmandoc \
 	libmemstat \
 	libmd \
@@ -275,14 +271,11 @@ _librtld_db=	librtld_db
 .endif
 
 .if ${MACHINE_CPUARCH} == "amd64"
-<<<<<<< HEAD
 _libcfxlite= libcfxlite
 _libdispatch= libdispatch
 _liblaunch=	liblaunch
 _libmach= libmach
-=======
 .if ${MK_BHYVE} != "no"
->>>>>>> 93ad9da2c42ed829200f58c8fa74764daf177cde
 _libvmmapi=	libvmmapi
 .endif
 .endif
