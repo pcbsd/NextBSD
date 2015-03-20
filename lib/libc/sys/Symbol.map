@@ -397,6 +397,7 @@ FBSD_1.3 {
 };
 
 FBSD_1.4 {
+	futimens;
 	ppoll;
 	kevent64;
 	__iopolicysys;
@@ -446,6 +447,7 @@ FBSD_1.4 {
 	mk_timer_destroy;
 	mk_timer_arm;
 	mk_timer_cancel;
+	utimensat;
 };
 
 FBSDprivate_1.0 {

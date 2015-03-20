@@ -668,6 +668,14 @@ t4_attach(device_t dev)
 		goto done;
 	}
 
+#if defined(__i386__)
+	if ((cpu_feature & CPUID_CX8) == 0) {
+		device_printf(dev, "64 bit atomics not available.\n");
+		rc = ENOTSUP;
+		goto done;
+	}
+#endif
+
 	/* Prepare the firmware for operation */
 	rc = prep_firmware(sc);
 	if (rc != 0)
@@ -2887,9 +2895,6 @@ build_medialist(struct port_info *pi, struct ifmedia *media)
 
 	switch(pi->port_type) {
 	case FW_PORT_TYPE_BT_XFI:
-		ifmedia_add(media, m | IFM_10G_T, data, NULL);
-		break;
-
 	case FW_PORT_TYPE_BT_XAUI:
 		ifmedia_add(media, m | IFM_10G_T, data, NULL);
 		/* fall through */
@@ -3131,6 +3136,9 @@ mcfail:
 	return (rc);
 }
 
+/*
+ * {begin|end}_synchronized_op must be called from the same thread.
+ */
 int
 begin_synchronized_op(struct adapter *sc, struct port_info *pi, int flags,
     char *wmesg)
@@ -3186,6 +3194,9 @@ done:
 	return (rc);
 }
 
+/*
+ * {begin|end}_synchronized_op must be called from the same thread.
+ */
 void
 end_synchronized_op(struct adapter *sc, int flags)
 {
@@ -3283,6 +3294,12 @@ cxgbe_uninit_synchronized(struct port_info *pi)
 	struct sge_txq *txq;
 
 	ASSERT_SYNCHRONIZED_OP(sc);
+
+	if (!(pi->flags & PORT_INIT_DONE)) {
+		KASSERT(!(ifp->if_drv_flags & IFF_DRV_RUNNING),
+		    ("uninited port is running"));
+		return (0);
+	}
 
 	/*
 	 * Disable the VI so that all its data in either direction is discarded
@@ -3412,6 +3429,7 @@ adapter_full_init(struct adapter *sc)
 {
 	int rc, i;
 
+	ASSERT_SYNCHRONIZED_OP(sc);
 	ADAPTER_LOCK_ASSERT_NOTOWNED(sc);
 	KASSERT((sc->flags & FULL_INIT_DONE) == 0,
 	    ("%s: FULL_INIT_DONE already", __func__));
@@ -5065,12 +5083,11 @@ sysctl_int_array(SYSCTL_HANDLER_ARGS)
 	int rc, *i;
 	struct sbuf sb;
 
-	sbuf_new(&sb, NULL, 32, SBUF_AUTOEXTEND);
+	sbuf_new_for_sysctl(&sb, NULL, 64, req);
 	for (i = arg1; arg2; arg2 -= sizeof(int), i++)
 		sbuf_printf(&sb, "%d ", *i);
 	sbuf_trim(&sb);
-	sbuf_finish(&sb);
-	rc = sysctl_handle_string(oidp, sbuf_data(&sb), sbuf_len(&sb), req);
+	rc = sbuf_finish(&sb);
 	sbuf_delete(&sb);
 	return (rc);
 }
@@ -7095,10 +7112,9 @@ get_filter_mode(struct adapter *sc, uint32_t *mode)
 		log(LOG_WARNING, "%s: cached filter mode out of sync %x %x.\n",
 		    device_get_nameunit(sc->dev), sc->params.tp.vlan_pri_map,
 		    fconf);
-		sc->params.tp.vlan_pri_map = fconf;
 	}
 
-	*mode = fconf_to_mode(sc->params.tp.vlan_pri_map);
+	*mode = fconf_to_mode(fconf);
 
 	end_synchronized_op(sc, LOCK_HELD);
 	return (0);
@@ -7123,20 +7139,13 @@ set_filter_mode(struct adapter *sc, uint32_t mode)
 	}
 
 #ifdef TCP_OFFLOAD
-	if (sc->offload_map) {
+	if (uld_active(sc, ULD_TOM)) {
 		rc = EBUSY;
 		goto done;
 	}
 #endif
 
-#ifdef notyet
 	rc = -t4_set_filter_mode(sc, fconf);
-	if (rc == 0)
-		sc->filter_mode = fconf;
-#else
-	rc = ENOTSUP;
-#endif
-
 done:
 	end_synchronized_op(sc, LOCK_HELD);
 	return (rc);
@@ -8201,7 +8210,12 @@ toe_capability(struct port_info *pi, int enable)
 		return (ENODEV);
 
 	if (enable) {
-		if (!(sc->flags & FULL_INIT_DONE)) {
+		/*
+		 * We need the port's queues around so that we're able to send
+		 * and receive CPLs to/from the TOE even if the ifnet for this
+		 * port has never been UP'd administratively.
+		 */
+		if (!(pi->flags & PORT_INIT_DONE)) {
 			rc = cxgbe_init_synchronized(pi);
 			if (rc)
 				return (rc);
@@ -8210,7 +8224,7 @@ toe_capability(struct port_info *pi, int enable)
 		if (isset(&sc->offload_map, pi->port_id))
 			return (0);
 
-		if (!(sc->flags & TOM_INIT_DONE)) {
+		if (!uld_active(sc, ULD_TOM)) {
 			rc = t4_activate_uld(sc, ULD_TOM);
 			if (rc == EAGAIN) {
 				log(LOG_WARNING,
@@ -8221,16 +8235,22 @@ toe_capability(struct port_info *pi, int enable)
 				return (rc);
 			KASSERT(sc->tom_softc != NULL,
 			    ("%s: TOM activated but softc NULL", __func__));
-			KASSERT(sc->flags & TOM_INIT_DONE,
+			KASSERT(uld_active(sc, ULD_TOM),
 			    ("%s: TOM activated but flag not set", __func__));
 		}
+
+		/* Activate iWARP and iSCSI too, if the modules are loaded. */
+		if (!uld_active(sc, ULD_IWARP))
+			(void) t4_activate_uld(sc, ULD_IWARP);
+		if (!uld_active(sc, ULD_ISCSI))
+			(void) t4_activate_uld(sc, ULD_ISCSI);
 
 		setbit(&sc->offload_map, pi->port_id);
 	} else {
 		if (!isset(&sc->offload_map, pi->port_id))
 			return (0);
 
-		KASSERT(sc->flags & TOM_INIT_DONE,
+		KASSERT(uld_active(sc, ULD_TOM),
 		    ("%s: TOM never initialized?", __func__));
 		clrbit(&sc->offload_map, pi->port_id);
 	}
@@ -8290,10 +8310,14 @@ done:
 int
 t4_activate_uld(struct adapter *sc, int id)
 {
-	int rc = EAGAIN;
+	int rc;
 	struct uld_info *ui;
 
 	ASSERT_SYNCHRONIZED_OP(sc);
+
+	if (id < 0 || id > ULD_MAX)
+		return (EINVAL);
+	rc = EAGAIN;	/* kldoad the module with this ULD and try again. */
 
 	sx_slock(&t4_uld_list_lock);
 
@@ -8302,16 +8326,18 @@ t4_activate_uld(struct adapter *sc, int id)
 			if (!(sc->flags & FULL_INIT_DONE)) {
 				rc = adapter_full_init(sc);
 				if (rc != 0)
-					goto done;
+					break;
 			}
 
 			rc = ui->activate(sc);
-			if (rc == 0)
+			if (rc == 0) {
+				setbit(&sc->active_ulds, id);
 				ui->refcount++;
-			goto done;
+			}
+			break;
 		}
 	}
-done:
+
 	sx_sunlock(&t4_uld_list_lock);
 
 	return (rc);
@@ -8320,25 +8346,40 @@ done:
 int
 t4_deactivate_uld(struct adapter *sc, int id)
 {
-	int rc = EINVAL;
+	int rc;
 	struct uld_info *ui;
 
 	ASSERT_SYNCHRONIZED_OP(sc);
+
+	if (id < 0 || id > ULD_MAX)
+		return (EINVAL);
+	rc = ENXIO;
 
 	sx_slock(&t4_uld_list_lock);
 
 	SLIST_FOREACH(ui, &t4_uld_list, link) {
 		if (ui->uld_id == id) {
 			rc = ui->deactivate(sc);
-			if (rc == 0)
+			if (rc == 0) {
+				clrbit(&sc->active_ulds, id);
 				ui->refcount--;
-			goto done;
+			}
+			break;
 		}
 	}
-done:
+
 	sx_sunlock(&t4_uld_list_lock);
 
 	return (rc);
+}
+
+int
+uld_active(struct adapter *sc, int uld_id)
+{
+
+	MPASS(uld_id >= 0 && uld_id <= ULD_MAX);
+
+	return (isset(&sc->active_ulds, uld_id));
 }
 #endif
 

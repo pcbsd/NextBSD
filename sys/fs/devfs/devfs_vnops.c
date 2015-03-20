@@ -63,7 +63,6 @@
 #include <sys/vnode.h>
 
 static struct vop_vector devfs_vnodeops;
-static struct vop_vector devfs_specops;
 static struct fileops devfs_ops_f;
 
 #include <fs/devfs/devfs.h>
@@ -1045,6 +1044,9 @@ devfs_mknod(struct vop_mknod_args *ap)
 	TAILQ_FOREACH(de, &dd->de_dlist, de_list) {
 		if (cnp->cn_namelen != de->de_dirent->d_namlen)
 			continue;
+		if (de->de_dirent->d_type == DT_CHR &&
+		    (de->de_cdp->cdp_flags & CDP_ACTIVE) == 0)
+			continue;
 		if (bcmp(cnp->cn_nameptr, de->de_dirent->d_name,
 		    de->de_dirent->d_namlen) != 0)
 			continue;
@@ -1757,7 +1759,7 @@ static struct vop_vector devfs_vnodeops = {
 	.vop_vptocnp =		devfs_vptocnp,
 };
 
-static struct vop_vector devfs_specops = {
+struct vop_vector devfs_specops = {
 	.vop_default =		&default_vnodeops,
 
 	.vop_access =		devfs_access,

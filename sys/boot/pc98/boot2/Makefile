@@ -39,8 +39,10 @@ CFLAGS=	-fomit-frame-pointer \
 CFLAGS.gcc+=	-Os \
 		-fno-guess-branch-probability \
 		-fno-unit-at-a-time \
-		-mno-align-long-strings \
 		--param max-inline-insns-single=100
+.if ${COMPILER_TYPE} == "gcc" && ${COMPILER_VERSION} <= 40201
+CFLAGS.gcc+=   -mno-align-long-strings
+.endif
 
 # Set machine type to PC98_SYSTEM_PARAMETER
 #CFLAGS+=	-DSET_MACHINE_TYPE
@@ -92,6 +94,7 @@ boot2.out: ${BTXCRT} boot2.o sio.o
 	${LD} ${LD_FLAGS} -Ttext ${ORG2} -o ${.TARGET} ${.ALLSRC}
 
 boot2.o: boot2.s
+	${CC} ${ACFLAGS} -c boot2.s
 
 SRCS=	boot2.c boot2.h
 

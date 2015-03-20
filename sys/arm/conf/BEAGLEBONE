@@ -25,7 +25,13 @@ ident		BEAGLEBONE
 
 include		"../ti/am335x/std.am335x"
 
-makeoptions	WITHOUT_MODULES="ahc"
+makeoptions	MODULES_EXTRA="dtb/am335x"
+
+# DTrace support
+options 	KDTRACE_HOOKS		# Kernel DTrace hooks
+options 	DDB_CTF			# all architectures - kernel ELF linker loads CTF data
+makeoptions	WITH_CTF=1
+makeoptions	MODULES_EXTRA+="opensolaris dtrace dtrace/lockstat dtrace/profile dtrace/fbt"
 
 options 	HZ=100
 options 	SCHED_4BSD		# 4BSD scheduler
@@ -101,6 +107,8 @@ device		iic
 device		ti_i2c
 device		am335x_pmic		# AM335x Power Management IC (TPC65217)
 
+device		am335x_rtc		# RTC support (power management only)
+
 # Console and misc
 device		uart
 device		uart_ns8250
@@ -157,5 +165,3 @@ device		usfs
 
 # Flattened Device Tree
 options 	FDT			# Configure using FDT/DTB data
-options 	FDT_DTB_STATIC
-makeoptions	FDT_DTS_FILE=beaglebone.dts

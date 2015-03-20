@@ -97,15 +97,19 @@ SYSCTL_INT(_hw_usb_xhci, OID_AUTO, streams, CTLFLAG_RWTUN,
 static int xhcidebug;
 static int xhciroute;
 static int xhcipolling;
+static int xhcidma32;
 
 SYSCTL_INT(_hw_usb_xhci, OID_AUTO, debug, CTLFLAG_RWTUN,
     &xhcidebug, 0, "Debug level");
 SYSCTL_INT(_hw_usb_xhci, OID_AUTO, xhci_port_route, CTLFLAG_RWTUN,
-    &xhciroute, 0, "Routing bitmap for switching EHCI ports to XHCI controller");
+    &xhciroute, 0, "Routing bitmap for switching EHCI ports to the XHCI controller");
 SYSCTL_INT(_hw_usb_xhci, OID_AUTO, use_polling, CTLFLAG_RWTUN,
-    &xhcipolling, 0, "Set to enable software interrupt polling for XHCI controller");
+    &xhcipolling, 0, "Set to enable software interrupt polling for the XHCI controller");
+SYSCTL_INT(_hw_usb_xhci, OID_AUTO, dma32, CTLFLAG_RWTUN,
+    &xhcidma32, 0, "Set to only use 32-bit DMA for the XHCI controller");
 #else
 #define	xhciroute 0
+#define	xhcidma32 0
 #endif
 
 #define	XHCI_INTR_ENDPT 1
@@ -492,7 +496,7 @@ xhci_start_controller(struct xhci_softc *sc)
 	XWRITE4(sc, runt, XHCI_ERDP_LO(0), (uint32_t)addr);
 	XWRITE4(sc, runt, XHCI_ERDP_HI(0), (uint32_t)(addr >> 32));
 
-	addr = (uint64_t)buf_res.physaddr;
+	addr = buf_res.physaddr;
 
 	DPRINTF("ERSTBA(0)=0x%016llx\n", (unsigned long long)addr);
 
@@ -576,7 +580,7 @@ xhci_halt_controller(struct xhci_softc *sc)
 }
 
 usb_error_t
-xhci_init(struct xhci_softc *sc, device_t self)
+xhci_init(struct xhci_softc *sc, device_t self, uint8_t dma32)
 {
 	uint32_t temp;
 
@@ -623,7 +627,8 @@ xhci_init(struct xhci_softc *sc, device_t self)
 	}
 
 	/* get DMA bits */
-	sc->sc_bus.dma_bits = XHCI_HCS0_AC64(temp) ? 64 : 32;
+	sc->sc_bus.dma_bits = (XHCI_HCS0_AC64(temp) &&
+	    xhcidma32 == 0 && dma32 == 0) ? 64 : 32;
 
 	device_printf(self, "%d bytes context size, %d-bit DMA\n",
 	    sc->sc_ctx_is_64_byte ? 64 : 32, (int)sc->sc_bus.dma_bits);
@@ -1114,7 +1119,7 @@ xhci_interrupt_poll(struct xhci_softc *sc)
 	 * register.
 	 */
 
-	addr = (uint32_t)buf_res.physaddr;
+	addr = buf_res.physaddr;
 	addr += (uintptr_t)&((struct xhci_hw_root *)0)->hwr_events[i];
 
 	/* try to clear busy bit */
@@ -1411,6 +1416,13 @@ xhci_set_address(struct usb_device *udev, struct mtx *mtx, uint16_t address)
 
 		pepext = xhci_get_endpoint_ext(udev,
 		    &udev->ctrl_ep_desc);
+
+		/* ensure the control endpoint is setup again */
+		USB_BUS_LOCK(udev->bus);
+		pepext->trb_halted = 1;
+		pepext->trb_running = 0;
+		USB_BUS_UNLOCK(udev->bus);
+
 		err = xhci_configure_endpoint(udev,
 		    &udev->ctrl_ep_desc, pepext,
 		    0, 1, 1, 0, mps, mps, USB_EP_MODE_DEFAULT);
@@ -1866,6 +1878,15 @@ restart:
 				    XHCI_TRB_3_TYPE_SET(XHCI_TRB_TYPE_DATA_STAGE);
 				if (temp->direction == UE_DIR_IN)
 					dword |= XHCI_TRB_3_DIR_IN | XHCI_TRB_3_ISP_BIT;
+				/*
+				 * Section 3.2.9 in the XHCI
+				 * specification about control
+				 * transfers says that we should use a
+				 * normal-TRB if there are more TRBs
+				 * extending the data-stage
+				 * TRB. Update the "trb_type".
+				 */
+				temp->trb_type = XHCI_TRB_TYPE_NORMAL;
 				break;
 			case XHCI_TRB_TYPE_STATUS_STAGE:
 				dword = XHCI_TRB_3_CHAIN_BIT | XHCI_TRB_3_CYCLE_BIT |
@@ -2106,7 +2127,8 @@ xhci_setup_generic_chain(struct usb_xfer *xfer)
 		mult = 1;
 		temp.isoc_delta = 0;
 		temp.isoc_frame = 0;
-		temp.trb_type = XHCI_TRB_TYPE_DATA_STAGE;
+		temp.trb_type = xfer->flags_int.control_did_data ?
+		    XHCI_TRB_TYPE_NORMAL : XHCI_TRB_TYPE_DATA_STAGE;
 	} else {
 		x = 0;
 		mult = 1;

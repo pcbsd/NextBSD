@@ -73,6 +73,9 @@
 #include <net/if_arp.h>
 #include <net/if_dl.h>
 #include <net/if_media.h>
+#ifdef	RSS
+#include <net/rss_config.h>
+#endif
 
 #include <net/if_types.h>
 #include <net/if_vlan_var.h>
@@ -85,9 +88,6 @@
 #include <netinet/tcp.h>
 #include <netinet/tcp_lro.h>
 #include <netinet/udp.h>
-#ifdef	RSS
-#include <netinet/in_rss.h>
-#endif
 
 #include <machine/in_cksum.h>
 #include <dev/led/led.h>
@@ -2460,6 +2460,9 @@ igb_allocate_msix(struct adapter *adapter)
 	struct igb_queue	*que = adapter->queues;
 	int			error, rid, vector = 0;
 	int			cpu_id = 0;
+#ifdef	RSS
+	cpuset_t cpu_mask;
+#endif
 
 	/* Be sure to start with all interrupts disabled */
 	E1000_WRITE_REG(&adapter->hw, E1000_IMC, ~0);
@@ -2566,8 +2569,9 @@ igb_allocate_msix(struct adapter *adapter)
 			 * round-robin bucket -> queue -> CPU allocation.
 			 */
 #ifdef	RSS
-			taskqueue_start_threads_pinned(&que->tq, 1, PI_NET,
-			    cpu_id,
+			CPU_SETOF(cpu_id, &cpu_mask);
+			taskqueue_start_threads_cpuset(&que->tq, 1, PI_NET,
+			    &cpu_mask,
 			    "%s que (bucket %d)",
 			    device_get_nameunit(adapter->dev),
 			    cpu_id);

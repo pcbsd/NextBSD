@@ -999,10 +999,12 @@
 545	AUE_POLL	STD	{ int ppoll(struct pollfd *fds, u_int nfds, \
 				    const struct timespec *ts, \
 				    const sigset_t *set); }
-					
+546	AUE_FUTIMES	STD	{ int futimens(int fd, \
+				    struct timespec *times); }
+547	AUE_FUTIMESAT	STD	{ int utimensat(int fd, \
+				    char *path, \
+				    struct timespec *times, int flag); }					
 ; padding so that the mach system calls are on a straightforward boundary
-546	AUE_NULL	UNIMPL	nosys
-547	AUE_NULL	UNIMPL	nosys
 548	AUE_NULL	UNIMPL	nosys
 549	AUE_NULL	UNIMPL	nosys
 550	AUE_NULL	UNIMPL	nosys

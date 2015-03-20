@@ -131,12 +131,12 @@ crypto/aesni/aeskeys_amd64.S	optional aesni
 crypto/aesni/aesni.c		optional aesni
 aesni_ghash.o			optional aesni				\
 	dependency	"$S/crypto/aesni/aesni_ghash.c"			\
-	compile-with	"${CC} -c ${CFLAGS:C/^-O2$/-O3/:N-nostdinc} ${WERROR} ${PROF} -mmmx -msse -msse4 -maes -mpclmul ${.IMPSRC}" \
+	compile-with	"${CC} -c ${CFLAGS:C/^-O2$/-O3/:N-nostdinc} ${WERROR} ${NO_WCAST_QUAL} ${PROF} -mmmx -msse -msse4 -maes -mpclmul ${.IMPSRC}" \
 	no-implicit-rule						\
 	clean		"aesni_ghash.o"
 aesni_wrap.o			optional aesni				\
 	dependency	"$S/crypto/aesni/aesni_wrap.c"			\
-	compile-with	"${CC} -c ${CFLAGS:C/^-O2$/-O3/:N-nostdinc} ${WERROR} ${PROF} -mmmx -msse -msse4 -maes ${.IMPSRC}" \
+	compile-with	"${CC} -c ${CFLAGS:C/^-O2$/-O3/:N-nostdinc} ${WERROR} ${NO_WCAST_QUAL} ${PROF} -mmmx -msse -msse4 -maes ${.IMPSRC}" \
 	no-implicit-rule						\
 	clean		"aesni_wrap.o"
 crypto/blowfish/bf_enc.c	optional	crypto | ipsec
@@ -514,10 +514,10 @@ compat/ndis/winx64_wrap.S	optional	ndisapi pci
 libkern/memmove.c		standard
 libkern/memset.c		standard
 #
-# x86 real mode BIOS emulator, required by atkbdc/dpms/vesa
+# x86 real mode BIOS emulator, required by atkbdc/dpms/pci/vesa
 #
-compat/x86bios/x86bios.c	optional x86bios | atkbd | dpms | vesa
-contrib/x86emu/x86emu.c		optional x86bios | atkbd | dpms | vesa
+compat/x86bios/x86bios.c	optional x86bios | atkbd | dpms | pci | vesa
+contrib/x86emu/x86emu.c		optional x86bios | atkbd | dpms | pci | vesa
 #
 # bvm console
 #
@@ -543,6 +543,7 @@ x86/iommu/intel_drv.c		optional	acpi acpi_dmar pci
 x86/iommu/intel_fault.c		optional	acpi acpi_dmar pci
 x86/iommu/intel_gas.c		optional	acpi acpi_dmar pci
 x86/iommu/intel_idpgtbl.c	optional	acpi acpi_dmar pci
+x86/iommu/intel_intrmap.c	optional	acpi acpi_dmar pci
 x86/iommu/intel_qi.c		optional	acpi acpi_dmar pci
 x86/iommu/intel_quirks.c	optional	acpi acpi_dmar pci
 x86/iommu/intel_utils.c		optional	acpi acpi_dmar pci
@@ -570,6 +571,7 @@ x86/x86/mptable.c		optional	mptable
 x86/x86/mptable_pci.c		optional	mptable pci
 x86/x86/msi.c			optional	pci
 x86/x86/nexus.c			standard
+x86/x86/pvclock.c		standard
 x86/x86/tsc.c			standard
 x86/x86/delay.c			standard
 x86/xen/hvm.c			optional	xenhvm

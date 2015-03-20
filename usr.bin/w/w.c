@@ -264,7 +264,9 @@ main(int argc, char *argv[])
 	if (header || wcmd == 0) {
 		pr_header(&now, nusers);
 		if (wcmd == 0) {
-		        xo_close_container("uptime-information");
+			xo_close_container("uptime-information");
+			xo_finish();
+
 			(void)kvm_close(kd);
 			exit(0);
 		}
@@ -552,5 +554,6 @@ usage(int wcmd)
 		xo_error("usage: w [-dhin] [-M core] [-N system] [user ...]\n");
 	else
 		xo_error("usage: uptime\n");
+	xo_finish();
 	exit(1);
 }

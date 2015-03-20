@@ -3834,6 +3834,24 @@ systrace_args(int sysnum, void *params, uint64_t *uarg, int *n_args)
 		*n_args = 2;
 		break;
 	}
+	/* futimens */
+	case 546: {
+		struct futimens_args *p = params;
+		iarg[0] = p->fd; /* int */
+		uarg[1] = (intptr_t) p->times; /* struct timespec * */
+		*n_args = 2;
+		break;
+	}
+	/* utimensat */
+	case 547: {
+		struct utimensat_args *p = params;
+		iarg[0] = p->fd; /* int */
+		uarg[1] = (intptr_t) p->path; /* char * */
+		uarg[2] = (intptr_t) p->times; /* struct timespec * */
+		iarg[3] = p->flag; /* int */
+		*n_args = 4;
+		break;
+	}
 	default:
 		*n_args = 0;
 		break;
@@ -9563,6 +9581,7 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			break;
 		};
 		break;
+<<<<<<< HEAD
 	/* _kernelrpc_mach_vm_allocate_trap */
 	case 610:
 		switch(ndx) {
@@ -10006,11 +10025,22 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			break;
 		case 2:
 			p = "uint64_t";
+=======
+	/* futimens */
+	case 546:
+		switch(ndx) {
+		case 0:
+			p = "int";
+			break;
+		case 1:
+			p = "struct timespec *";
+>>>>>>> 93ad9da2c42ed829200f58c8fa74764daf177cde
 			break;
 		default:
 			break;
 		};
 		break;
+<<<<<<< HEAD
 	/* task_name_for_pid */
 	case 644:
 		switch(ndx) {
@@ -10167,10 +10197,24 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 			break;
 		case 2:
 			p = "int";
+=======
+	/* utimensat */
+	case 547:
+		switch(ndx) {
+		case 0:
+			p = "int";
+			break;
+		case 1:
+			p = "char *";
+			break;
+		case 2:
+			p = "struct timespec *";
+>>>>>>> 93ad9da2c42ed829200f58c8fa74764daf177cde
 			break;
 		case 3:
 			p = "int";
 			break;
+<<<<<<< HEAD
 		case 4:
 			p = "mach_timespec_t *";
 			break;
@@ -10233,6 +10277,8 @@ systrace_entry_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 		case 1:
 			p = "mach_absolute_time_t *";
 			break;
+=======
+>>>>>>> 93ad9da2c42ed829200f58c8fa74764daf177cde
 		default:
 			break;
 		};
@@ -12207,6 +12253,7 @@ systrace_return_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 		if (ndx == 0 || ndx == 1)
 			p = "int";
 		break;
+<<<<<<< HEAD
 	/* _kernelrpc_mach_vm_allocate_trap */
 	case 610:
 		if (ndx == 0 || ndx == 1)
@@ -12421,6 +12468,15 @@ systrace_return_setargdesc(int sysnum, int ndx, char *desc, size_t descsz)
 		break;
 	/* mk_timer_cancel */
 	case 694:
+=======
+	/* futimens */
+	case 546:
+		if (ndx == 0 || ndx == 1)
+			p = "int";
+		break;
+	/* utimensat */
+	case 547:
+>>>>>>> 93ad9da2c42ed829200f58c8fa74764daf177cde
 		if (ndx == 0 || ndx == 1)
 			p = "int";
 		break;

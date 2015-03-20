@@ -1,5 +1,7 @@
 # $FreeBSD$
 
+.include <src.opts.mk>
+
 MAN=	accept_filter.9 \
 	accf_data.9 \
 	accf_dns.9 \
@@ -193,6 +195,10 @@ MAN=	accept_filter.9 \
 	p_candebug.9 \
 	p_cansee.9 \
 	pci.9 \
+	PCI_ADD_VF.9 \
+	PCI_INIT_IOV.9 \
+	pci_iov_schema.9 \
+	PCI_UNINIT_IOV.9 \
 	pfil.9 \
 	pfind.9 \
 	pget.9 \
@@ -252,7 +258,6 @@ MAN=	accept_filter.9 \
 	sleep.9 \
 	sleepqueue.9 \
 	socket.9 \
-	spl.9 \
 	stack.9 \
 	store.9 \
 	style.9 \
@@ -272,7 +277,6 @@ MAN=	accept_filter.9 \
 	uidinfo.9 \
 	uio.9 \
 	unr.9 \
-	usbdi.9 \
 	utopia.9 \
 	vaccess.9 \
 	vaccess_acl_nfs4.9 \
@@ -1159,6 +1163,8 @@ MLINKS+=pci.9 pci_alloc_msi.9 \
 	pci.9 pci_get_powerstate.9 \
 	pci.9 pci_get_vpd_ident.9 \
 	pci.9 pci_get_vpd_readonly.9 \
+	pci.9 pci_iov_attach.9 \
+	pci.9 pci_iov_detach.9 \
 	pci.9 pci_msi_count.9 \
 	pci.9 pci_msix_count.9 \
 	pci.9 pci_pending_msix.9 \
@@ -1170,6 +1176,14 @@ MLINKS+=pci.9 pci_alloc_msi.9 \
 	pci.9 pci_set_powerstate.9 \
 	pci.9 pci_set_max_read_req.9 \
 	pci.9 pci_write_config.9
+MLINKS+=pci_iov_schema.9 pci_iov_schema_alloc_node.9 \
+	pci_iov_schema.9 pci_iov_schema_add_bool.9 \
+	pci_iov_schema.9 pci_iov_schema_add_string.9 \
+	pci_iov_schema.9 pci_iov_schema_add_uint8.9 \
+	pci_iov_schema.9 pci_iov_schema_add_uint16.9 \
+	pci_iov_schema.9 pci_iov_schema_add_uint32.9 \
+	pci_iov_schema.9 pci_iov_schema_add_uint64.9 \
+	pci_iov_schema.9 pci_iov_schema_add_unicast_mac.9
 MLINKS+=pfil.9 pfil_add_hook.9 \
 	pfil.9 pfil_head_register.9 \
 	pfil.9 pfil_head_unregister.9 \
@@ -1447,18 +1461,6 @@ MLINKS+=socket.9 soabort.9 \
 	socket.9 soupcall_clear.9 \
 	socket.9 soupcall_set.9 \
 	socket.9 sowakeup.9
-MLINKS+=spl.9 spl0.9 \
-	spl.9 splbio.9 \
-	spl.9 splclock.9 \
-	spl.9 splhigh.9 \
-	spl.9 splimp.9 \
-	spl.9 splnet.9 \
-	spl.9 splsoftclock.9 \
-	spl.9 splsofttty.9 \
-	spl.9 splstatclock.9 \
-	spl.9 spltty.9 \
-	spl.9 splvm.9 \
-	spl.9 splx.9
 MLINKS+=stack.9 stack_copy.9 \
 	stack.9 stack_create.9 \
 	stack.9 stack_destroy.9 \
@@ -1606,6 +1608,9 @@ MLINKS+=uidinfo.9 uifind.9 \
 	uidinfo.9 uihold.9
 MLINKS+=uio.9 uiomove.9 \
 	uio.9 uiomove_nofault.9
+
+.if ${MK_USB} != "no"
+MAN+=	usbdi.9
 MLINKS+=usbdi.9 usbd_do_request.9 \
 	usbdi.9 usbd_do_request_flags.9 \
 	usbdi.9 usbd_errstr.9 \
@@ -1657,6 +1662,7 @@ MLINKS+=usbdi.9 usbd_do_request.9 \
 	usbdi.9 usb_fifo_reset.9 \
 	usbdi.9 usb_fifo_softc.9 \
 	usbdi.9 usb_fifo_wakeup.9
+.endif
 MLINKS+=vcount.9 count_dev.9
 MLINKS+=vfsconf.9 vfs_modevent.9 \
 	vfsconf.9 vfs_register.9 \

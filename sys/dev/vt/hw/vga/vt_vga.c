@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD$");
 
 #include <dev/vt/vt.h>
 #include <dev/vt/hw/vga/vt_vga_reg.h>
+#include <dev/pci/pcivar.h>
 
 #include <machine/bus.h>
 
@@ -1213,6 +1214,9 @@ vga_init(struct vt_device *vd)
 	sc = vd->vd_softc;
 	textmode = 0;
 
+	if (vd->vd_flags & VDF_DOWNGRADE && vd->vd_video_dev != NULL)
+		vga_pci_repost(vd->vd_video_dev);
+
 #if defined(__amd64__) || defined(__i386__)
 	sc->vga_fb_tag = X86_BUS_SPACE_MEM;
 	sc->vga_fb_handle = KERNBASE + VGA_MEM_BASE;
@@ -1263,7 +1267,8 @@ static int
 vtvga_probe(device_t dev)
 {
 
-	device_set_desc(dev, "vt_vga driver");
+	device_set_desc(dev, "VT VGA driver");
+
 	return (BUS_PROBE_NOWILDCARD);
 }
 
