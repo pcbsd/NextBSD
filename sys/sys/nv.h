@@ -142,11 +142,8 @@ void nvlist_add_stringf(nvlist_t *nvl, const char *name, const char *valuefmt, .
 void nvlist_add_stringv(nvlist_t *nvl, const char *name, const char *valuefmt, va_list valueap) __printflike(3, 0);
 #endif
 void nvlist_add_nvlist(nvlist_t *nvl, const char *name, const nvlist_t *value);
-<<<<<<< HEAD:lib/libnv/nv.h
 void nvlist_add_nvlist_type(nvlist_t *nvl, const char *name, const nvlist_t *value, int type);
-=======
 #ifndef _KERNEL
->>>>>>> 93ad9da2c42ed829200f58c8fa74764daf177cde:sys/sys/nv.h
 void nvlist_add_descriptor(nvlist_t *nvl, const char *name, int value);
 #endif
 void nvlist_add_binary(nvlist_t *nvl, const char *name, const void *value, size_t size);
@@ -250,11 +247,8 @@ void nvlist_addf_number(nvlist_t *nvl, uint64_t value, const char *namefmt, ...)
 void nvlist_addf_number_type(nvlist_t *nvl, uint64_t value, int type, const char *namefmt, ...) __printflike(4, 5);
 void nvlist_addf_string(nvlist_t *nvl, const char *value, const char *namefmt, ...) __printflike(3, 4);
 void nvlist_addf_nvlist(nvlist_t *nvl, const nvlist_t *value, const char *namefmt, ...) __printflike(3, 4);
-<<<<<<< HEAD:lib/libnv/nv.h
 void nvlist_addf_nvlist_type(nvlist_t *nvl, const nvlist_t *value, int type, const char *namefmt, ...) __printflike(4, 5);
-=======
 #ifndef _KERNEL
->>>>>>> 93ad9da2c42ed829200f58c8fa74764daf177cde:sys/sys/nv.h
 void nvlist_addf_descriptor(nvlist_t *nvl, int value, const char *namefmt, ...) __printflike(3, 4);
 #endif
 void nvlist_addf_binary(nvlist_t *nvl, const void *value, size_t size, const char *namefmt, ...) __printflike(4, 5);
@@ -266,11 +260,9 @@ void nvlist_addv_number(nvlist_t *nvl, uint64_t value, const char *namefmt, va_l
 void nvlist_addv_number_type(nvlist_t *nvl, uint64_t value, int type, const char *namefmt, va_list nameap) __printflike(4, 0);
 void nvlist_addv_string(nvlist_t *nvl, const char *value, const char *namefmt, va_list nameap) __printflike(3, 0);
 void nvlist_addv_nvlist(nvlist_t *nvl, const nvlist_t *value, const char *namefmt, va_list nameap) __printflike(3, 0);
-<<<<<<< HEAD:lib/libnv/nv.h
+
 void nvlist_addv_nvlist_type(nvlist_t *nvl, const nvlist_t *value, int type, const char *namefmt, va_list nameap) __printflike(4, 0);
-=======
 #ifndef _KERNEL
->>>>>>> 93ad9da2c42ed829200f58c8fa74764daf177cde:sys/sys/nv.h
 void nvlist_addv_descriptor(nvlist_t *nvl, int value, const char *namefmt, va_list nameap) __printflike(3, 0);
 #endif
 void nvlist_addv_binary(nvlist_t *nvl, const void *value, size_t size, const char *namefmt, va_list nameap) __printflike(4, 0);
@@ -286,11 +278,8 @@ void nvlist_movef_binary(nvlist_t *nvl, void *value, size_t size, const char *na
 #if !defined(_KERNEL) || defined(_VA_LIST_DECLARED)
 void nvlist_movev_string(nvlist_t *nvl, char *value, const char *namefmt, va_list nameap) __printflike(3, 0);
 void nvlist_movev_nvlist(nvlist_t *nvl, nvlist_t *value, const char *namefmt, va_list nameap) __printflike(3, 0);
-<<<<<<< HEAD:lib/libnv/nv.h
 void nvlist_movev_nvlist_type(nvlist_t *nvl, nvlist_t *value, int type, const char *namefmt, va_list nameap) __printflike(4, 0);
-=======
 #ifndef _KERNEL
->>>>>>> 93ad9da2c42ed829200f58c8fa74764daf177cde:sys/sys/nv.h
 void nvlist_movev_descriptor(nvlist_t *nvl, int value, const char *namefmt, va_list nameap) __printflike(3, 0);
 #endif
 void nvlist_movev_binary(nvlist_t *nvl, void *value, size_t size, const char *namefmt, va_list nameap) __printflike(4, 0);
