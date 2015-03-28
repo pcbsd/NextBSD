@@ -1949,7 +1949,7 @@ fdcopy(struct filedesc *fdp)
 	for (i = 0; i <= fdp->fd_lastfile; ++i) {
 		ofde = &fdp->fd_ofiles[i];
 		if (ofde->fde_file == NULL ||
-		    (ofde->fde_file->f_ops->fo_flags & DFLAG_PASSABLE) == 0) {
+			(ofde->fde_file->f_type != DTYPE_KQUEUE)) {
 			if (newfdp->fd_freefile == -1)
 				newfdp->fd_freefile = i;
 			continue;
