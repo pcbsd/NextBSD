@@ -1477,101 +1477,10 @@ ixl_assign_vsi_msix(struct ixl_pf *pf)
 static int
 ixl_init_msix(struct ixl_pf *pf)
 {
-	device_t dev = pf->dev;
-	int rid, want, vectors, queues, available;
+	int rid;
 
-	/* Override by tuneable */
-	if (ixl_enable_msix == 0)
-		goto msi;
-
-	/*
-	** When used in a virtualized environment 
-	** PCI BUSMASTER capability may not be set
-	** so explicity set it here and rewrite
-	** the ENABLE in the MSIX control register
-	** at this point to cause the host to
-	** successfully initialize us.
-	*/
-	{
-		u16 pci_cmd_word;
-		int msix_ctrl;
-		pci_cmd_word = pci_read_config(dev, PCIR_COMMAND, 2);
-		pci_cmd_word |= PCIM_CMD_BUSMASTEREN;
-		pci_write_config(dev, PCIR_COMMAND, pci_cmd_word, 2);
-		pci_find_cap(dev, PCIY_MSIX, &rid);
-		rid += PCIR_MSIX_CTRL;
-		msix_ctrl = pci_read_config(dev, rid, 2);
-		msix_ctrl |= PCIM_MSIXCTRL_MSIX_ENABLE;
-		pci_write_config(dev, rid, msix_ctrl, 2);
-	}
-
-	/* First try MSI/X */
 	rid = PCIR_BAR(IXL_BAR);
-	pf->msix_mem = bus_alloc_resource_any(dev,
-	    SYS_RES_MEMORY, &rid, RF_ACTIVE);
-       	if (!pf->msix_mem) {
-		/* May not be enabled */
-		device_printf(pf->dev,
-		    "Unable to map MSIX table \n");
-		goto msi;
-	}
-
-	available = pci_msix_count(dev); 
-	if (available == 0) { /* system has msix disabled */
-		bus_release_resource(dev, SYS_RES_MEMORY,
-		    rid, pf->msix_mem);
-		pf->msix_mem = NULL;
-		goto msi;
-	}
-
-	/* Figure out a reasonable auto config value */
-	queues = (mp_ncpus > (available - 1)) ? (available - 1) : mp_ncpus;
-
-	/* Override with hardcoded value if sane */
-	if ((ixl_max_queues != 0) && (ixl_max_queues <= queues)) 
-		queues = ixl_max_queues;
-
-#ifdef  RSS
-	/* If we're doing RSS, clamp at the number of RSS buckets */
-	if (queues > rss_getnumbuckets())
-		queues = rss_getnumbuckets();
-#endif
-
-	/*
-	** Want one vector (RX/TX pair) per queue
-	** plus an additional for the admin queue.
-	*/
-	want = queues + 1;
-	if (want <= available)	/* Have enough */
-		vectors = want;
-	else {
-               	device_printf(pf->dev,
-		    "MSIX Configuration Problem, "
-		    "%d vectors available but %d wanted!\n",
-		    available, want);
-		return (0); /* Will go to Legacy setup */
-	}
-
-	if (pci_alloc_msix(dev, &vectors) == 0) {
-               	device_printf(pf->dev,
-		    "Using MSIX interrupts with %d vectors\n", vectors);
-		pf->msix = vectors;
-		pf->vsi.num_queues = queues;
-		return (vectors);
-	}
-msi:
-       	vectors = pci_msi_count(dev);
-	pf->vsi.num_queues = 1;
-	pf->msix = 1;
-	ixl_max_queues = 1;
-	ixl_enable_msix = 0;
-       	if (vectors == 1 && pci_alloc_msi(dev, &vectors) == 0)
-               	device_printf(pf->dev,"Using an MSI interrupt\n");
-	else {
-		pf->msix = 0;
-               	device_printf(pf->dev,"Using a Legacy interrupt\n");
-	}
-	return (vectors);
+	return (iflib_msix_init(UPCAST(pf), rid, 1));
 }
 
 
@@ -1880,8 +1789,6 @@ ixl_setup_interface(device_t dev, struct ixl_vsi *vsi)
 	sctx->isc_rx_maxsize = PAGE_SIZE*4;
 	sctx->isc_rx_nsegments = 1;
 	sctx->isc_rx_maxsegsize = PAGE_SIZE*4;
-
-	sctx->isc_nqsets = vsi->num_queues;
 
 	/* initialize fast path functions */
 	ixl_txrx_init(sctx);
