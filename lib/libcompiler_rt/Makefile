@@ -7,6 +7,7 @@ NO_PIC=
 WARNS?=	2
 
 CFLAGS+=${PICFLAG} -fvisibility=hidden -DVISIBILITY_HIDDEN
+CFLAGS+=-I${.CURDIR}/../../contrib/libcxxrt
 
 .if ${MACHINE_CPUARCH} == "amd64"
 CRTARCH=x86_64
@@ -36,6 +37,7 @@ SRCF=	absvdi2 \
 	clzti2 \
 	cmpdi2 \
 	cmpti2 \
+	comparetf2 \
 	ctzdi2 \
 	ctzsi2 \
 	ctzti2 \
@@ -49,18 +51,26 @@ SRCF=	absvdi2 \
 	divxc3 \
 	enable_execute_stack \
 	eprintf \
+	extenddftf2 \
+	extendsftf2 \
 	ffsdi2 \
 	ffsti2 \
 	fixdfdi \
 	fixdfti \
 	fixsfdi \
 	fixsfti \
+	fixtfdi \
+	fixtfsi \
+	fixtfti \
 	fixunsdfdi \
 	fixunsdfsi \
 	fixunsdfti \
 	fixunssfdi \
 	fixunssfsi \
 	fixunssfti \
+	fixunstfdi \
+	fixunstfsi \
+	fixunstfti \
 	fixunsxfdi \
 	fixunsxfsi \
 	fixunsxfti \
@@ -69,6 +79,7 @@ SRCF=	absvdi2 \
 	floatdidf \
 	floatdisf \
 	floatdixf \
+	floatsitf \
 	floattidf \
 	floattisf \
 	floattixf \
@@ -120,6 +131,8 @@ SRCF=	absvdi2 \
 	subvsi3 \
 	subvti3 \
 	trampoline_setup \
+	trunctfdf2 \
+	trunctfsf2 \
 	ucmpdi2 \
 	ucmpti2 \
 	udivdi3 \

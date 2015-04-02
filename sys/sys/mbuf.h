@@ -578,6 +578,7 @@ m_extaddref(struct mbuf *m, caddr_t buf, u_int size, u_int *ref_cnt,
 	m->m_ext.ext_arg1 = arg1;
 	m->m_ext.ext_arg2 = arg2;
 	m->m_ext.ext_type = EXT_EXTREF;
+	m->m_ext.ext_flags = 0;
 }
 
 static __inline uma_zone_t
@@ -685,8 +686,8 @@ static __inline int
 m_clget(struct mbuf *m, int how)
 {
 
-	if (m->m_flags & M_EXT)
-		printf("%s: %p mbuf already has external storage\n", __func__, m);
+	KASSERT((m->m_flags & M_EXT) == 0, ("%s: mbuf %p has M_EXT",
+	    __func__, m));
 	m->m_ext.ext_buf = (char *)NULL;
 	uma_zalloc_arg(zone_clust, m, how);
 	/*
@@ -712,10 +713,11 @@ m_cljget(struct mbuf *m, int how, int size)
 {
 	uma_zone_t zone;
 
-	if (m && m->m_flags & M_EXT)
-		printf("%s: %p mbuf already has external storage\n", __func__, m);
-	if (m != NULL)
+	if (m != NULL) {
+		KASSERT((m->m_flags & M_EXT) == 0, ("%s: mbuf %p has M_EXT",
+		    __func__, m));
 		m->m_ext.ext_buf = NULL;
+	}
 
 	zone = m_getzone(size);
 	return (uma_zalloc_arg(zone, m, how));
@@ -1190,6 +1192,15 @@ rt_m_getfib(struct mbuf *m)
 	((_m)->m_pkthdr.fibnum) = (_fib);				\
 } while (0)
 
+/* flags passed as first argument for "m_ether_tcpip_hash()" */
+#define	MBUF_HASHFLAG_L2	(1 << 2)
+#define	MBUF_HASHFLAG_L3	(1 << 3)
+#define	MBUF_HASHFLAG_L4	(1 << 4)
+
+/* mbuf hashing helper routines */
+uint32_t	m_ether_tcpip_hash_init(void);
+uint32_t	m_ether_tcpip_hash(const uint32_t, const struct mbuf *, const uint32_t);
+
 #ifdef MBUF_PROFILING
  void m_profile(struct mbuf *m);
  #define M_PROFILE(m) m_profile(m)
@@ -1282,6 +1293,7 @@ mbufq_dequeue(struct mbufq *mq)
 	m = STAILQ_FIRST(&mq->mq_head);
 	if (m) {
 		STAILQ_REMOVE_HEAD(&mq->mq_head, m_stailqpkt);
+		m->m_nextpkt = NULL;
 		mq->mq_len--;
 	}
 	return (m);

@@ -133,6 +133,7 @@ SUBDIR=	${_addr2line} \
 	procstat \
 	protect \
 	rctl \
+	${_readelf} \
 	renice \
 	rev \
 	revoke \
@@ -196,12 +197,9 @@ SUBDIR=	${_addr2line} \
 	write \
 	xargs \
 	xinstall \
-	${_xlint} \
 	xo \
-	${_xstr} \
 	xz \
 	xzdec \
-	${_yacc} \
 	yes \
 	${_ypcat} \
 	${_ypmatch} \
@@ -241,6 +239,7 @@ SUBDIR+=	ee
 _addr2line=	addr2line
 _elfcopy=	elfcopy
 _nm=		nm
+_readelf=	readelf
 _size=		size
 _strings=	strings
 .endif
