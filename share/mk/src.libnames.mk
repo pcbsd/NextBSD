@@ -35,6 +35,7 @@ _INTERNALIBS=	\
 		mandoc \
 		netbsd \
 		ntp \
+		ntpevent \
 		ohash \
 		opts \
 		parse \
@@ -170,7 +171,7 @@ _DP_edit=	ncursesw
 .if ${MK_OPENSSL} != "no"
 _DP_bsnmp=	crypto
 .endif
-_DP_grom=	bsdxml sbuf
+_DP_geom=	bsdxml sbuf
 _DP_cam=	sbuf
 _DP_casper=	capsicum nv pjdlog
 _DP_capsicum=	nv
@@ -358,11 +359,14 @@ LIBCRON?=	${LIBCRONDIR}/libcron.a
 LIBNTPDIR=	${ROOTOBJDIR}/usr.sbin/ntp/libntp
 LIBNTP?=	${LIBNTPDIR}/libntp.a
 
+LIBNTPEVENTDIR=	${ROOTOBJDIR}/usr.sbin/ntp/libntpevent
+LIBNTPEVENT?=	${LIBNTPDIR}/libntpevent.a
+
 LIBOPTSDIR=	${ROOTOBJDIR}/usr.sbin/ntp/libopts
 LIBOTPS?=	${LIBOPTSDIR}/libopts.a
 
 LIBPARSEDIR=	${ROOTOBJDIR}/usr.sbin/ntp/libparse
-LIBPARSE?=	${LIBOPTSDIR}/libparse.a
+LIBPARSE?=	${LIBPARSEDIR}/libparse.a
 
 LIBLPRDIR=	${ROOTOBJDIR}/usr.sbin/lpr/common_source
 LIBLPR?=	${LIBOPTSDIR}/liblpr.a

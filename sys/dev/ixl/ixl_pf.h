@@ -36,6 +36,22 @@
 #ifndef _IXL_PF_H_
 #define _IXL_PF_H_
 
+#define	VF_FLAG_ENABLED			0x01
+#define	VF_FLAG_SET_MAC_CAP		0x02
+#define	VF_FLAG_VLAN_CAP		0x04
+#define	VF_FLAG_PROMISC_CAP		0x08
+#define	VF_FLAG_MAC_ANTI_SPOOF		0x10
+
+struct ixl_vf {
+	struct ixl_vsi		vsi;
+	uint32_t		vf_flags;
+
+	uint8_t			mac[ETHER_ADDR_LEN];
+	uint16_t		vf_num;
+
+	struct sysctl_ctx_list	ctx;
+};
+
 /* Physical controller structure */
 struct ixl_pf {
 	/*
@@ -73,9 +89,10 @@ struct ixl_pf {
 	struct task     	adminq;
 	struct taskqueue	*tq;
 
+	bool			link_up;
+	u32			link_speed;
 	int			advertised_speed;
 	int			fc; /* local flow ctrl setting */
-
 
 	/* Misc stats maintained by the driver */
 	u64			watchdog_events;
@@ -85,6 +102,37 @@ struct ixl_pf {
 	struct i40e_hw_port_stats 	stats;
 	struct i40e_hw_port_stats	stats_offsets;
 	bool 				stat_offsets_loaded;
+
+	struct ixl_vf		*vfs;
+	int			num_vfs;
+	uint16_t		veb_seid;
+	struct task		vflr_task;
+	int			vc_debug_lvl;
 };
+
+#define IXL_SET_ADVERTISE_HELP		\
+"Control link advertise speed:\n"	\
+"\tFlags:\n"				\
+"\t\t0x1 - advertise 100 Mb\n"		\
+"\t\t0x2 - advertise 1G\n"		\
+"\t\t0x4 - advertise 10G\n"		\
+"\t\t0x8 - advertise 20G\n\n"		\
+"\tDoes not work on 40G devices."
+
+#define	I40E_VC_DEBUG(pf, level, ...) \
+	do { \
+		if ((pf)->vc_debug_lvl >= (level)) \
+			device_printf((pf)->dev, __VA_ARGS__); \
+	} while (0)
+
+#define	i40e_send_vf_nack(pf, vf, op, st) \
+	ixl_send_vf_nack_msg((pf), (vf), (op), (st), __FILE__, __LINE__)
+
+#define IXL_PF_LOCK_INIT(_sc, _name) \
+        mtx_init(&(_sc)->pf_mtx, _name, "IXL PF Lock", MTX_DEF)
+#define IXL_PF_LOCK(_sc)              mtx_lock(&(_sc)->pf_mtx)
+#define IXL_PF_UNLOCK(_sc)            mtx_unlock(&(_sc)->pf_mtx)
+#define IXL_PF_LOCK_DESTROY(_sc)      mtx_destroy(&(_sc)->pf_mtx)
+#define IXL_PF_LOCK_ASSERT(_sc)       mtx_assert(&(_sc)->pf_mtx, MA_OWNED)
 
 #endif /* _IXL_PF_H_ */
