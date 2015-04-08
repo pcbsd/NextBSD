@@ -41,6 +41,7 @@
 #include "ixl.h"
 #include "ixl_pf.h"
 
+#undef DEV_NETMAP
 #ifdef RSS
 #include <net/rss_config.h>
 #endif
@@ -116,12 +117,13 @@ static int	ixl_enable_rings(struct ixl_vsi *);
 static int	ixl_disable_rings(struct ixl_vsi *);
 static void	ixl_enable_intr(struct ixl_vsi *);
 static void	ixl_disable_intr(struct ixl_vsi *);
-static void	ixl_disable_rings_intr(struct ixl_vsi *);
 
 static void     ixl_enable_adminq(struct i40e_hw *);
 static void     ixl_disable_adminq(struct i40e_hw *);
 static void     ixl_enable_queue(struct i40e_hw *, int);
+#if 0
 static void     ixl_disable_queue(struct i40e_hw *, int);
+#endif
 static void     ixl_enable_legacy(struct i40e_hw *);
 static void     ixl_disable_legacy(struct i40e_hw *);
 
@@ -278,12 +280,6 @@ static driver_t ixl_if_driver = {
 #ifdef DEV_NETMAP
 MODULE_DEPEND(ixl, netmap, 1, 1, 1);
 #endif /* DEV_NETMAP */
-
-
-/*
-** Global reset mutex
-*/
-static struct mtx ixl_reset_mtx;
 
 
 /*
@@ -1514,7 +1510,7 @@ ixl_assign_vsi_legacy(struct ixl_pf *pf)
 	if (error) {
 		device_printf(dev, "Failed to register legacy/msi handler");
 		return (error);
-
+	}
 #ifdef PCI_IOV
 	TASK_INIT(&pf->vflr_task, 0, ixl_handle_vflr, pf);
 #endif
@@ -1535,9 +1531,6 @@ ixl_assign_vsi_msix(struct ixl_pf *pf)
 	struct 		ixl_vsi *vsi = &pf->vsi;
 	struct 		ixl_queue *que = vsi->queues;
 	int 		err, rid, vector = 0;
-#ifdef	RSS
-	cpuset_t cpu_mask;
-#endif
 
 	/* Admin Que is vector 0*/
 	rid = vector + 1;
@@ -2039,8 +2032,10 @@ ixl_initialize_vsi(struct ixl_vsi *vsi)
 
 	memset(&ctxt, 0, sizeof(ctxt));
 	ctxt.seid = vsi->seid;
+#ifdef notyet	
 	if (pf->veb_seid != 0)
 		ctxt.uplink_seid = pf->veb_seid;
+#endif	
 	ctxt.pf_num = hw->pf_id;
 	err = i40e_aq_get_vsi_params(hw, &ctxt, NULL);
 	if (err) {
@@ -2205,8 +2200,6 @@ ixl_initialize_vsi(struct ixl_vsi *vsi)
 void
 ixl_free_vsi(struct ixl_vsi *vsi)
 {
-	struct ixl_mac_filter *f;
-
 	free(vsi->queues, M_DEVBUF);
 
 	/* Free VSI filter list */
@@ -2853,9 +2846,6 @@ ixl_add_filter(struct ixl_vsi *vsi, u8 *macaddr, s16 vlan)
 
 	DEBUGOUT("ixl_add_filter: begin");
 
-	pf = vsi->back;
-	dev = pf->dev;
-
 	/* Does one already exist */
 	f = ixl_find_filter(vsi, macaddr, vlan);
 	if (f != NULL)
@@ -3006,10 +2996,6 @@ ixl_del_hw_filters(struct ixl_vsi *vsi, int cnt)
 	int			err, j = 0;
 
 	DEBUGOUT("ixl_del_hw_filters: begin\n");
-
-	pf = vsi->back;
-	hw = &pf->hw;
-	dev = pf->dev;
 
 	d = malloc(sizeof(struct i40e_aqc_remove_macvlan_element_data) * cnt,
 	    M_DEVBUF, M_NOWAIT | M_ZERO);
@@ -3268,16 +3254,6 @@ ixl_enable_intr(struct ixl_vsi *vsi)
 }
 
 static void
-ixl_disable_rings_intr(struct ixl_vsi *vsi)
-{
-	struct i40e_hw		*hw = vsi->hw;
-	struct ixl_queue	*que = vsi->queues;
-
-	for (int i = 0; i < vsi->num_queues; i++, que++)
-		ixl_disable_queue(hw, que->me);
-}
-
-static void
 ixl_disable_intr(struct ixl_vsi *vsi)
 {
 	struct i40e_hw		*hw = vsi->hw;
@@ -3323,6 +3299,7 @@ ixl_enable_queue(struct i40e_hw *hw, int id)
 	wr32(hw, I40E_PFINT_DYN_CTLN(id), reg);
 }
 
+#if 0
 static void
 ixl_disable_queue(struct i40e_hw *hw, int id)
 {
@@ -3333,6 +3310,7 @@ ixl_disable_queue(struct i40e_hw *hw, int id)
 
 	return;
 }
+#endif
 
 static void
 ixl_enable_legacy(struct i40e_hw *hw)
@@ -3554,7 +3532,6 @@ ixl_if_update_admin_status(if_shared_ctx_t sctx)
 		return;
 	}
 
-	IXL_PF_LOCK(pf);
 	/* clean and process any events */
 	do {
 		ret = i40e_clean_arq_element(hw, &event, &result);
@@ -3596,7 +3573,6 @@ ixl_if_update_admin_status(if_shared_ctx_t sctx)
 	else
 		ixl_enable_intr(vsi);
 
-	IXL_PF_UNLOCK(pf);
 }
 
 static int
@@ -3672,7 +3648,6 @@ void ixl_update_eth_stats(struct ixl_vsi *vsi)
 	struct i40e_hw *hw = &pf->hw;
 	struct i40e_eth_stats *es;
 	struct i40e_eth_stats *oes;
-	uint64_t tx_discards;
 
 	struct i40e_hw_port_stats *nsd;
 	u16 stat_idx = vsi->info.stat_counter_idx;
@@ -3729,14 +3704,12 @@ static void
 ixl_update_vsi_stats(struct ixl_vsi *vsi)
 {
 	struct ixl_pf		*pf;
-	struct ifnet		*ifp;
 	struct i40e_eth_stats	*es;
 	u64			tx_discards;
 
 	struct i40e_hw_port_stats *nsd;
 
 	pf = vsi->back;
-	ifp = vsi->ifp;
 	es = &vsi->eth_stats;
 	nsd = &pf->stats;
 

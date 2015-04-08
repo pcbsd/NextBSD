@@ -59,6 +59,8 @@
 #include <vm/pmap.h>
 
 #include <dev/led/led.h>
+#include <dev/pci/pcireg.h>
+#include <dev/pci/pcivar.h>
 
 #include <net/iflib.h>
 
@@ -125,6 +127,7 @@ struct iflib_ctx {
 	eventhandler_tag ifc_vlan_attach_event;
 	eventhandler_tag ifc_vlan_detach_event;
 	struct cdev *ifc_led_dev;
+	struct resource *ifc_msix_mem;
 
 	struct if_irq ifc_legacy_irq;
 	struct grouptask ifc_admin_task;
@@ -260,6 +263,8 @@ struct iflib_rxq {
 	struct iflib_filter_info ifr_filter_info;
 };
 
+
+static int enable_msix = 1;
 
 #define mtx_held(m)	(((m)->mtx_lock & ~MTX_FLAGMASK) != (uintptr_t)0)
 
@@ -427,11 +432,8 @@ _iflib_irq_alloc(iflib_ctx_t ctx, if_irq_t irq, int rid,
 		return (ENOMEM);
 	}
 
-	/*
-	 * Sort out handler versus filter XXX
-	 */
 	rc = bus_setup_intr(dev, res, INTR_MPSAFE | INTR_TYPE_NET,
-	    NULL, handler, arg, &tag);
+						filter, handler, arg, &tag);
 	if (rc != 0) {
 		device_printf(dev,
 		    "failed to setup interrupt for rid %d, name %s: %d\n",
@@ -2436,7 +2438,7 @@ iflib_irq_alloc_generic(if_shared_ctx_t sctx, if_irq_t irq, int rid,
 	info->ifi_task = gtask;
 
 	/* XXX query cpu that rid belongs to */
-#ifdef notyet
+#ifdef notyet /* how do we iterate - qid!*/
 	bus_bind_intr(dev, que->res, cpu_id);
 #endif
 	err = _iflib_irq_alloc(ctx, irq, rid, iflib_fast_intr, NULL, info,  name);
@@ -2571,4 +2573,96 @@ iflib_sctx_lock_get(if_shared_ctx_t sctx)
 {
 
 	return (&sctx->isc_ctx->ifc_mtx);
+}
+
+int
+iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
+{
+	device_t dev = sctx->isc_dev;
+	int vectors, queues, queuemsgs, msgs;
+	iflib_ctx_t ctx = sctx->isc_ctx;
+
+	/* Override by tuneable */
+	if (enable_msix == 0)
+		goto msi;
+
+	/*
+	** When used in a virtualized environment 
+	** PCI BUSMASTER capability may not be set
+	** so explicity set it here and rewrite
+	** the ENABLE in the MSIX control register
+	** at this point to cause the host to
+	** successfully initialize us.
+	*/
+	{
+		uint16_t pci_cmd_word;
+		int msix_ctrl;
+		pci_cmd_word = pci_read_config(dev, PCIR_COMMAND, 2);
+		pci_cmd_word |= PCIM_CMD_BUSMASTEREN;
+		pci_write_config(dev, PCIR_COMMAND, pci_cmd_word, 2);
+		pci_find_cap(dev, PCIY_MSIX, &rid);
+		rid += PCIR_MSIX_CTRL;
+		msix_ctrl = pci_read_config(dev, rid, 2);
+		msix_ctrl |= PCIM_MSIXCTRL_MSIX_ENABLE;
+		pci_write_config(dev, rid, msix_ctrl, 2);
+	}
+
+	/* First try MSI/X */
+	ctx->ifc_msix_mem = bus_alloc_resource_any(dev,
+	    SYS_RES_MEMORY, &rid, RF_ACTIVE);
+       	if (!ctx->ifc_msix_mem) {
+		/* May not be enabled */
+		device_printf(dev, "Unable to map MSIX table \n");
+		goto msi;
+	}
+
+	if ((msgs = pci_msix_count(dev)) == 0) { /* system has msix disabled */
+		bus_release_resource(dev, SYS_RES_MEMORY,
+		    rid, ctx->ifc_msix_mem);
+		ctx->ifc_msix_mem = NULL;
+		goto msi;
+	}
+	queuemsgs = msgs - admincnt;
+	if (bus_get_cpus(dev, INTR_CPUS, &sctx->isc_cpus) == 0) {
+		queues = imin(CPU_COUNT(&sctx->isc_cpus), queuemsgs);
+#ifdef notyet
+		bind_queues = 1;
+#endif		
+	} else {
+		device_printf(dev, "Unable to fetch CPU list\n");
+		/* Figure out a reasonable auto config value */
+		queues = (mp_ncpus > queuemsgs) ? queuemsgs : mp_ncpus;
+	}
+#if 0	
+	/* Override with hardcoded value if sane */
+	if ((ixl_max_queues != 0) && (ixl_max_queues <= queues)) 
+		queues = ixl_max_queues;
+#endif
+#ifdef  RSS
+	/* If we're doing RSS, clamp at the number of RSS buckets */
+	if (queues > rss_getnumbuckets())
+		queues = rss_getnumbuckets();
+#endif
+
+	vectors = queues + admincnt;
+	if (pci_alloc_msix(dev, &vectors) == 0) {
+		device_printf(dev,
+					  "Using MSIX interrupts with %d vectors\n", vectors);
+		sctx->isc_vectors = vectors;
+		sctx->isc_nqsets = queues;
+		sctx->isc_intr = IFLIB_INTR_MSIX;
+		return (vectors);
+	} /* else free msix table */
+msi:
+	vectors = pci_msi_count(dev);
+	sctx->isc_nqsets = 1;
+	sctx->isc_vectors = vectors;
+	if (vectors == 1 && pci_alloc_msi(dev, &vectors) == 0) {
+		device_printf(dev,"Using an MSI interrupt\n");
+		sctx->isc_intr = IFLIB_INTR_MSI;
+	} else {
+		device_printf(dev,"Using a Legacy interrupt\n");
+		sctx->isc_intr = IFLIB_INTR_LEGACY;
+	}
+	return (vectors);
 }

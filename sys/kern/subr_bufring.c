@@ -209,7 +209,7 @@ brsc_entry_get(struct buf_ring_sc *br, int i)
 		ent = br->br_ring[i*ALIGN_SCALE].bre_ptr;
 	else
 		ent = br->br_ring[i].bre_ptr;
-	return ((void *)ent);
+	return ((void *)(uintptr_t)ent);
 }
 
 static __inline void

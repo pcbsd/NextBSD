@@ -83,7 +83,7 @@ br_entry_get(struct buf_ring *br, int i)
 		ent = br->br_ring[i*(CACHE_LINE_SIZE/sizeof(caddr_t))].bre_ptr;
 	else
 		ent = br->br_ring[i].bre_ptr;
-	return ((void *)ent);
+	return ((void *)(uintptr_t)ent);
 }
 
 static __inline void
@@ -280,7 +280,7 @@ buf_ring_dequeue_mc(struct buf_ring *br)
 	atomic_store_rel_32(&br->br_cons_tail, cons_next);
 	critical_exit();
 
-	return ((void *)buf);
+	return ((void *)(uintptr_t)buf);
 }
 
 /*
@@ -334,7 +334,7 @@ buf_ring_dequeue_sc(struct buf_ring *br)
 #endif
 	atomic_store_rel_32(&br->br_cons_tail, cons_next);
 
-	return ((void *)buf);
+	return ((void *)(uintptr_t)buf);
 }
 
 /*
@@ -417,7 +417,7 @@ buf_ring_peek(struct buf_ring *br)
 	/* ensure that the ring load completes before
 	 * exposing it to any destructive updates
 	 */
-	return ((void *)br->br_ring[cons_head].bre_ptr);
+	return ((void *)(uintptr_t)br->br_ring[cons_head].bre_ptr);
 }
 
 static __inline int

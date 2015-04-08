@@ -39,7 +39,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/buf_ring.h>
 #include <sys/mbuf.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
@@ -101,6 +100,8 @@
 
 #if defined(IXL_DEBUG) || defined(IXL_DEBUG_SYSCTL)
 #include <sys/sbuf.h>
+
+#undef DEV_NETMAP
 
 #define MAC_FORMAT "%02x:%02x:%02x:%02x:%02x:%02x"
 #define MAC_FORMAT_ARGS(mac_addr) \
@@ -489,7 +490,6 @@ struct ixl_vsi {
 	struct if_irq	irq;	
 	u16			uplink_seid;
 	u16			downlink_seid;
-	u16			max_frame_size;
 
 	/* MAC/VLAN Filter list */
 	struct ixl_ftl_head ftl;

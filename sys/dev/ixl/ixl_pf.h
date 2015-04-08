@@ -128,11 +128,4 @@ struct ixl_pf {
 #define	i40e_send_vf_nack(pf, vf, op, st) \
 	ixl_send_vf_nack_msg((pf), (vf), (op), (st), __FILE__, __LINE__)
 
-#define IXL_PF_LOCK_INIT(_sc, _name) \
-        mtx_init(&(_sc)->pf_mtx, _name, "IXL PF Lock", MTX_DEF)
-#define IXL_PF_LOCK(_sc)              mtx_lock(&(_sc)->pf_mtx)
-#define IXL_PF_UNLOCK(_sc)            mtx_unlock(&(_sc)->pf_mtx)
-#define IXL_PF_LOCK_DESTROY(_sc)      mtx_destroy(&(_sc)->pf_mtx)
-#define IXL_PF_LOCK_ASSERT(_sc)       mtx_assert(&(_sc)->pf_mtx, MA_OWNED)
-
 #endif /* _IXL_PF_H_ */

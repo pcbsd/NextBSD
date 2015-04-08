@@ -29,6 +29,7 @@
 
 #include <sys/kobj.h>
 #include <sys/bus.h>
+#include <sys/cpuset.h>
 #include <machine/bus.h>
 #include <sys/bus_dma.h>
 
@@ -96,6 +97,12 @@ struct if_int_delay_info {
 	struct sysctl_req *iidi_req;
 };
 
+typedef enum {
+	IFLIB_INTR_LEGACY,
+	IFLIB_INTR_MSI,
+	IFLIB_INTR_MSIX
+} iflib_intr_type_t;
+
 /*
  * Context shared between the driver and the iflib layer
  * Is treated as a superclass of the driver's softc, so
@@ -119,6 +126,9 @@ struct if_shared_ctx {
 	iflib_ctx_t isc_ctx;
 	device_t isc_dev;
 	if_t isc_ifp;
+	cpuset_t isc_cpus;
+	iflib_intr_type_t isc_intr;
+	int isc_vectors;
 	int isc_nqsets;
 	int isc_nrxq;
 	int isc_ntxd;
@@ -197,5 +207,7 @@ struct mtx *iflib_sctx_lock_get(if_shared_ctx_t);
 struct mtx *iflib_qset_lock_get(if_shared_ctx_t, uint16_t);
 
 uint64_t iflib_get_counter_default(if_shared_ctx_t, ift_counter);
+
+int iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt);
 
 #endif /*  __IFLIB_H_ */
