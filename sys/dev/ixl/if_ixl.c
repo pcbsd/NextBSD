@@ -846,7 +846,8 @@ ixl_get_hw_capabilities(struct ixl_pf *pf)
 {
 	struct i40e_aqc_list_capabilities_element_resp *buf;
 	struct i40e_hw	*hw = &pf->hw;
-	device_t 	dev = pf->dev;
+	if_shared_ctx_t sctx = UPCAST(pf);
+	device_t 	dev = sctx->isc_dev;
 	int             error, len;
 	u16		needed;
 	bool		again = TRUE;
@@ -1443,7 +1444,7 @@ ixl_update_link_status(struct ixl_pf *pf)
 {
 	struct ixl_vsi		*vsi = &pf->vsi;
 	struct i40e_hw		*hw = &pf->hw;
-	device_t		dev = pf->dev;
+	device_t		dev = vsi->hwdev;
 
 	if (pf->link_up){ 
 		if (vsi->link_active == FALSE) {
@@ -1501,7 +1502,7 @@ ixl_if_stop(if_shared_ctx_t sctx)
 static int
 ixl_assign_vsi_legacy(struct ixl_pf *pf)
 {
-	device_t        dev = pf->dev;
+	device_t        dev = UPCAST(pf)->isc_dev;
 	int 		error, rid = 0;
 	
 	if (pf->msix == 1)
@@ -1729,7 +1730,7 @@ static int
 ixl_allocate_pci_resources(struct ixl_pf *pf)
 {
 	int             rid;
-	device_t        dev = pf->dev;
+	device_t        dev = UPCAST(pf)->isc_dev;
 
 	rid = PCIR_BAR(0);
 	pf->pci_mem = bus_alloc_resource_any(dev, SYS_RES_MEMORY,
@@ -1764,7 +1765,7 @@ ixl_free_pci_resources(struct ixl_pf * pf)
 {
 	struct ixl_vsi		*vsi = &pf->vsi;
 	struct ixl_queue	*que = vsi->queues;
-	device_t		dev = pf->dev;
+	device_t		dev = vsi->hwdev;
 	int			rid, memrid;
 
 	memrid = PCIR_BAR(IXL_BAR);
@@ -1959,7 +1960,7 @@ ixl_link_event(struct ixl_pf *pf, struct i40e_arq_event_info *e)
 	if ((status->link_info & I40E_AQ_MEDIA_AVAILABLE) &&
 	    (!(status->an_info & I40E_AQ_QUALIFIED_MODULE)) &&
 	    (!(status->link_info & I40E_AQ_LINK_UP)))
-		device_printf(pf->dev, "Link failed because "
+		device_printf(UPCAST(pf)->isc_dev, "Link failed because "
 		    "an unqualified module was detected\n");
 
 	return;
@@ -2229,9 +2230,9 @@ ixl_free_mac_filters(struct ixl_vsi *vsi)
 static int
 ixl_setup_stations(struct ixl_pf *pf)
 {
-	device_t		dev = pf->dev;
 	struct ixl_vsi		*vsi = &pf->vsi;
 	if_shared_ctx_t sctx = UPCAST(vsi);
+	device_t		dev = sctx->isc_dev;
 	struct ixl_queue	*que;
 	struct tx_ring		*txr;
 	struct rx_ring		*rxr;
@@ -2443,7 +2444,7 @@ ixl_add_vsi_sysctls(struct ixl_pf *pf, struct ixl_vsi *vsi,
 	struct sysctl_oid_list *child;
 	struct sysctl_oid_list *vsi_list;
 
-	tree = device_get_sysctl_tree(pf->dev);
+	tree = device_get_sysctl_tree(vsi->hwdev);
 	child = SYSCTL_CHILDREN(tree);
 	vsi->vsi_node = SYSCTL_ADD_NODE(ctx, child, OID_AUTO, sysctl_name,
 				   CTLFLAG_RD, NULL, "VSI Number");
@@ -2455,8 +2456,8 @@ ixl_add_vsi_sysctls(struct ixl_pf *pf, struct ixl_vsi *vsi,
 static void
 ixl_add_hw_stats(struct ixl_pf *pf)
 {
-	device_t dev = pf->dev;
 	struct ixl_vsi *vsi = &pf->vsi;
+	device_t dev = vsi->hwdev;
 	struct ixl_queue *queues = vsi->queues;
 	struct i40e_hw_port_stats *pf_stats = &pf->stats;
 
@@ -3065,7 +3066,7 @@ ixl_enable_rings(struct ixl_vsi *vsi)
 			i40e_msec_delay(10);
 		}
 		if ((reg & I40E_QTX_ENA_QENA_STAT_MASK) == 0) {
-			device_printf(pf->dev, "TX queue %d disabled!\n",
+			device_printf(vsi->hwdev, "TX queue %d disabled!\n",
 			    index);
 			error = ETIMEDOUT;
 		}
@@ -3082,7 +3083,7 @@ ixl_enable_rings(struct ixl_vsi *vsi)
 			i40e_msec_delay(10);
 		}
 		if ((reg & I40E_QRX_ENA_QENA_STAT_MASK) == 0) {
-			device_printf(pf->dev, "RX queue %d disabled!\n",
+			device_printf(vsi->hwdev, "RX queue %d disabled!\n",
 			    index);
 			error = ETIMEDOUT;
 		}
@@ -3142,7 +3143,7 @@ ixl_disable_rings(struct ixl_vsi *vsi)
 			i40e_msec_delay(10);
 		}
 		if (reg & I40E_QTX_ENA_QENA_STAT_MASK) {
-			device_printf(pf->dev, "TX queue %d still enabled!\n",
+			device_printf(vsi->hwdev, "TX queue %d still enabled!\n",
 			    index);
 			error = ETIMEDOUT;
 		}
@@ -3158,7 +3159,7 @@ ixl_disable_rings(struct ixl_vsi *vsi)
 			i40e_msec_delay(10);
 		}
 		if (reg & I40E_QRX_ENA_QENA_STAT_MASK) {
-			device_printf(pf->dev, "RX queue %d still enabled!\n",
+			device_printf(vsi->hwdev, "RX queue %d still enabled!\n",
 			    index);
 			error = ETIMEDOUT;
 		}
@@ -3176,7 +3177,7 @@ ixl_disable_rings(struct ixl_vsi *vsi)
 static void ixl_handle_mdd_event(struct ixl_pf *pf)
 {
 	struct i40e_hw *hw = &pf->hw;
-	device_t dev = pf->dev;
+	device_t dev = UPCAST(pf)->isc_dev;
 	bool mdd_detected = false;
 	bool pf_mdd_detected = false;
 	u32 reg;
@@ -3830,7 +3831,7 @@ ixl_set_flowcntl(SYSCTL_HANDLER_ARGS)
 	 */
 	struct ixl_pf *pf = (struct ixl_pf *)arg1;
 	struct i40e_hw *hw = &pf->hw;
-	device_t dev = pf->dev;
+	device_t dev = UPCAST(pf)->isc_dev;
 	int error = 0;
 	enum i40e_status_code aq_error = 0;
 	u8 fc_aq_err = 0;
@@ -3918,7 +3919,7 @@ static int
 ixl_set_advertised_speeds(struct ixl_pf *pf, int speeds)
 {
 	struct i40e_hw *hw = &pf->hw;
-	device_t dev = pf->dev;
+	device_t dev = UPCAST(pf)->isc_dev;
 	struct i40e_aq_get_phy_abilities_resp abilities;
 	struct i40e_aq_set_phy_config config;
 	enum i40e_status_code aq_error = 0;
@@ -3986,7 +3987,7 @@ ixl_set_advertise(SYSCTL_HANDLER_ARGS)
 {
 	struct ixl_pf *pf = (struct ixl_pf *)arg1;
 	struct i40e_hw *hw = &pf->hw;
-	device_t dev = pf->dev;
+	device_t dev = UPCAST(pf)->isc_dev;
 	int requested_ls = 0;
 	int error = 0;
 
@@ -4261,7 +4262,7 @@ ixl_sysctl_hw_res_alloc(SYSCTL_HANDLER_ARGS)
 {
 	struct ixl_pf *pf = (struct ixl_pf *)arg1;
 	struct i40e_hw *hw = &pf->hw;
-	device_t dev = pf->dev;
+	device_t dev = UPCAST(pf)->isc_dev;
 	struct sbuf *buf;
 	int error = 0;
 
@@ -4360,7 +4361,7 @@ ixl_sysctl_switch_config(SYSCTL_HANDLER_ARGS)
 {
 	struct ixl_pf *pf = (struct ixl_pf *)arg1;
 	struct i40e_hw *hw = &pf->hw;
-	device_t dev = pf->dev;
+	device_t dev = UPCAST(pf)->isc_dev;
 	struct sbuf *buf;
 	struct sbuf *nmbuf;
 	int error = 0;
@@ -4493,7 +4494,7 @@ ixl_vf_alloc_vsi(struct ixl_pf *pf, struct ixl_vf *vf)
 
 	code = i40e_aq_config_vsi_bw_limit(hw, vf->vsi.seid, 0, 0, NULL);
 	if (code != I40E_SUCCESS) {
-		device_printf(pf->dev, "Failed to disable BW limit: %d\n",
+		device_printf(UPCAST(pf)->isc_dev, "Failed to disable BW limit: %d\n",
 		    ixl_adminq_err_to_errno(hw->aq.asq_last_status));
 		return (ixl_adminq_err_to_errno(hw->aq.asq_last_status));
 	}
@@ -4691,7 +4692,7 @@ ixl_reinit_vf(struct ixl_pf *pf, struct ixl_vf *vf)
 
 	error = ixl_flush_pcie(pf, vf);
 	if (error != 0)
-		device_printf(pf->dev,
+		device_printf(UPCAST(pf)->isc_dev,
 		    "Timed out waiting for PCIe activity to stop on VF-%d\n",
 		    vf->vf_num);
 
@@ -4704,7 +4705,7 @@ ixl_reinit_vf(struct ixl_pf *pf, struct ixl_vf *vf)
 	}
 
 	if (i == IXL_VF_RESET_TIMEOUT)
-		device_printf(pf->dev, "VF %d failed to reset\n", vf->vf_num);
+		device_printf(UPCAST(pf)->isc_dev, "VF %d failed to reset\n", vf->vf_num);
 
 	wr32(hw, I40E_VFGEN_RSTAT1(vf->vf_num), I40E_VFR_COMPLETED);
 
@@ -5577,7 +5578,7 @@ ixl_handle_vf_msg(struct ixl_pf *pf, struct i40e_arq_event_info *event)
 	opcode = le32toh(event->desc.cookie_high);
 
 	if (vf_num >= pf->num_vfs) {
-		device_printf(pf->dev, "Got msg from illegal VF: %d\n", vf_num);
+		device_printf(UPCAST(pf)->isc_dev, "Got msg from illegal VF: %d\n", vf_num);
 		return;
 	}
 
