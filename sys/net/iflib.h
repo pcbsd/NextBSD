@@ -167,7 +167,8 @@ int iflib_device_detach(device_t);
 int iflib_device_suspend(device_t);
 int iflib_device_resume(device_t);
 
-int iflib_register(device_t dev, driver_t *driver, uint8_t addr[ETH_ADDR_LEN]);
+int iflib_register(device_t dev, driver_t *driver);
+void iflib_hwaddr_set(if_shared_ctx_t ctx, uint8_t addr[ETH_ADDR_LEN]);
 
 /*
  * By convention queue 0 is the tx completion queue,

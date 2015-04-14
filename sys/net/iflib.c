@@ -2071,8 +2071,17 @@ struct buf_ring_sc_consumer brsc = {
  *
  **********************************************************************/
 
+void
+iflib_hwaddr_set(if_shared_ctx_t sctx, uint8_t addr[ETH_ADDR_LEN])
+{
+	if_t ifp;
+
+	ifp = sctx->isc_ifp;
+	ether_ifattach(ifp, addr);
+}
+
 int
-iflib_register(device_t dev, driver_t *driver, uint8_t addr[ETH_ADDR_LEN])
+iflib_register(device_t dev, driver_t *driver)
 {
 	if_shared_ctx_t sctx = device_get_softc(dev);
 	iflib_ctx_t ctx;
@@ -2106,7 +2115,6 @@ iflib_register(device_t dev, driver_t *driver, uint8_t addr[ETH_ADDR_LEN])
 	if_setqflushfn(ifp, iflib_if_qflush);
 	if_setgetcounterfn(ifp, iflib_if_get_counter);
 	if_setflags(ifp, IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST);
-	ether_ifattach(ifp, addr);
 
 	if_setcapabilities(ifp, 0);
 	if_setcapenable(ifp, 0);

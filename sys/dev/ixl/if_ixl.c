@@ -496,6 +496,7 @@ ixl_attach(device_t dev)
 	/* Allocate, clear, and link in our primary soft structure */
 	pf = device_get_softc(dev);
 	sctx = UPCAST(pf);
+	sctx->isc_dev = dev;
 	hw = &pf->hw;
 
 	/*
@@ -586,6 +587,11 @@ ixl_attach(device_t dev)
 
 	pf->vc_debug_lvl = 1;
 
+	/* Setup OS specific network interface */
+	if ((error = iflib_register(dev, &ixl_if_driver)) != 0) {
+		/* ixl specific teardown */
+		return (error);
+	}
 
 	/* Do PCI setup - map BAR0, etc */
 	if (ixl_allocate_pci_resources(pf)) {
@@ -713,11 +719,7 @@ ixl_attach(device_t dev)
 	i40e_aq_get_link_info(hw, TRUE, NULL, NULL);
 	pf->link_up = i40e_get_link_status(hw);
 
-	/* Setup OS specific network interface */
-	if ((error = iflib_register(dev, &ixl_if_driver, hw->mac.addr)) != 0) {
-		/* ixl specific teardown */
-		return (error);
-	}
+	iflib_hwaddr_set(sctx, hw->mac.addr);
 
 	if (ixl_setup_interface(dev, vsi) != 0) {
 		device_printf(dev, "interface setup failed!\n");
