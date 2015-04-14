@@ -87,6 +87,8 @@ options 	INVARIANT_SUPPORT	# Extra sanity checks of internal structures, require
 options 	WITNESS			# Enable checks to detect deadlocks and cycles
 options 	WITNESS_SKIPSPIN	# Don't run witness on spinlocks for speed
 options 	MALLOC_DEBUG_MAXZONES=8	# Separate malloc(9) zones
+options		ALT_BREAK_TO_DEBUGGER
+
 
 # Make an SMP-capable kernel by default
 options 	SMP			# Symmetric MultiProcessor Kernel
@@ -220,12 +222,6 @@ device		bxe			# Broadcom NetXtreme II BCM5771X/BCM578XX 10GbE
 device		de			# DEC/Intel DC21x4x (``Tulip'')
 device		em			# Intel PRO/1000 Gigabit Ethernet Family
 device		igb			# Intel PRO/1000 PCIE Server Gigabit Family
-device		ixl			# Intel XL710 40Gbe PCIE Ethernet
-#device		ixlv			# Intel XL710 40Gbe VF PCIE Ethernet
-device		le			# AMD Am7900 LANCE and Am79C9xx PCnet
-device		ti			# Alteon Networks Tigon I/II gigabit Ethernet
-device		txp			# 3Com 3cR990 (``Typhoon'')
-device		vx			# 3Com 3c590, 3c595 (``Vortex'')
 
 # PCI Ethernet NICs that use the common MII bus controller code.
 # NOTE: Be sure to keep the 'device miibus' line in order to use these NICs!
@@ -264,33 +260,6 @@ device		vr			# VIA Rhine, Rhine II
 device		wb			# Winbond W89C840F
 device		xl			# 3Com 3c90x (``Boomerang'', ``Cyclone'')
 
-# Wireless NIC cards
-device		wlan			# 802.11 support
-options 	IEEE80211_DEBUG		# enable debug msgs
-options 	IEEE80211_AMPDU_AGE	# age frames in AMPDU reorder q's
-options 	IEEE80211_SUPPORT_MESH	# enable 802.11s draft support
-device		wlan_wep		# 802.11 WEP support
-device		wlan_ccmp		# 802.11 CCMP support
-device		wlan_tkip		# 802.11 TKIP support
-device		wlan_amrr		# AMRR transmit rate control algorithm
-device		an			# Aironet 4500/4800 802.11 wireless NICs.
-device		ath			# Atheros NICs
-device		ath_pci			# Atheros pci/cardbus glue
-device		ath_hal			# pci/cardbus chip support
-options 	AH_SUPPORT_AR5416	# enable AR5416 tx/rx descriptors
-options 	AH_AR5416_INTERRUPT_MITIGATION # AR5416 interrupt mitigation
-options 	ATH_ENABLE_11N		# Enable 802.11n support for AR5416 and later
-device		ath_rate_sample		# SampleRate tx rate control for ath
-#device		bwi			# Broadcom BCM430x/BCM431x wireless NICs.
-#device		bwn			# Broadcom BCM43xx wireless NICs.
-device		ipw			# Intel 2100 wireless NICs.
-device		iwi			# Intel 2200BG/2225BG/2915ABG wireless NICs.
-device		iwn			# Intel 4965/1000/5000/6000 wireless NICs.
-device		malo			# Marvell Libertas wireless NICs.
-device		mwl			# Marvell 88W8363 802.11n wireless NICs.
-device		ral			# Ralink Technology RT2500 wireless NICs.
-device		wi			# WaveLAN/Intersil/Symbol 802.11 wireless NICs.
-device		wpi			# Intel 3945ABG wireless NICs.
 
 # Pseudo devices.
 device		loop			# Network loopback
@@ -319,15 +288,6 @@ device		usb			# USB Bus (required)
 device		ukbd			# Keyboard
 device		umass			# Disks/Mass storage - Requires scbus and da
 
-# Sound support
-device		sound			# Generic sound driver (required)
-device		snd_cmi			# CMedia CMI8338/CMI8738
-device		snd_csa			# Crystal Semiconductor CS461x/428x
-device		snd_emu10kx		# Creative SoundBlaster Live! and Audigy
-device		snd_es137x		# Ensoniq AudioPCI ES137x
-device		snd_hda			# Intel High Definition Audio
-device		snd_ich			# Intel, NVidia and other ICH AC'97 Audio
-device		snd_via8233		# VIA VT8233x Audio
 
 # MMC/SD
 device		mmc			# MMC/SD bus
