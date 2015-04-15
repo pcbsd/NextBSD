@@ -590,6 +590,16 @@ ixl_attach(device_t dev)
 	hw->back = &pf->osdep;
 	pf->osdep.dev = dev;
 
+	sctx->isc_q_align = PAGE_SIZE;/* max(DBA_ALIGN, PAGE_SIZE) */
+
+	sctx->isc_tx_maxsize = IXL_TSO_SIZE;
+	sctx->isc_tx_nsegments = IXL_MAX_TX_SEGS;
+	sctx->isc_tx_maxsegsize = PAGE_SIZE*4;
+
+	sctx->isc_rx_maxsize = PAGE_SIZE*4;
+	sctx->isc_rx_nsegments = 1;
+	sctx->isc_rx_maxsegsize = PAGE_SIZE*4;
+
 	/* Setup OS specific network interface */
 	if ((error = iflib_register(dev, &ixl_if_driver)) != 0) {
 		/* ixl specific teardown */
@@ -1883,16 +1893,6 @@ ixl_setup_interface(device_t dev, struct ixl_vsi *vsi)
 
 
 	INIT_DEBUGOUT("ixl_setup_interface: begin");
-	sctx->isc_q_align = PAGE_SIZE;/* max(DBA_ALIGN, PAGE_SIZE) */
-
-	sctx->isc_tx_maxsize = IXL_TSO_SIZE;
-	sctx->isc_tx_nsegments = IXL_MAX_TX_SEGS;
-	sctx->isc_tx_maxsegsize = PAGE_SIZE*4;
-
-	sctx->isc_rx_maxsize = PAGE_SIZE*4;
-	sctx->isc_rx_nsegments = 1;
-	sctx->isc_rx_maxsegsize = PAGE_SIZE*4;
-
 	/* initialize fast path functions */
 	ixl_txrx_init(sctx);
 
