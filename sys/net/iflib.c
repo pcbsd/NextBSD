@@ -2646,13 +2646,14 @@ iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
 	/* First try MSI/X */
 	ctx->ifc_msix_mem = bus_alloc_resource_any(dev,
 	    SYS_RES_MEMORY, &rid, RF_ACTIVE);
-       	if (!ctx->ifc_msix_mem) {
+	if (ctx->ifc_msix_mem == NULL) {
 		/* May not be enabled */
 		device_printf(dev, "Unable to map MSIX table \n");
 		goto msi;
 	}
 
 	if ((msgs = pci_msix_count(dev)) == 0) { /* system has msix disabled */
+		device_printf(dev, "System has MSIX disabled \n");
 		bus_release_resource(dev, SYS_RES_MEMORY,
 		    rid, ctx->ifc_msix_mem);
 		ctx->ifc_msix_mem = NULL;
@@ -2661,6 +2662,8 @@ iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
 	queuemsgs = msgs - admincnt;
 	if (bus_get_cpus(dev, INTR_CPUS, &sctx->isc_cpus) == 0) {
 		queues = imin(CPU_COUNT(&sctx->isc_cpus), queuemsgs);
+		device_printf(dev, "pxm cpus: %d queue msgs: %d\n",
+					  CPU_COUNT(&sctx->isc_cpus), queuemsgs);
 #ifdef notyet
 		bind_queues = 1;
 #endif		
@@ -2669,11 +2672,6 @@ iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
 		/* Figure out a reasonable auto config value */
 		queues = (mp_ncpus > queuemsgs) ? queuemsgs : mp_ncpus;
 	}
-#if 0	
-	/* Override with hardcoded value if sane */
-	if ((ixl_max_queues != 0) && (ixl_max_queues <= queues)) 
-		queues = ixl_max_queues;
-#endif
 #ifdef  RSS
 	/* If we're doing RSS, clamp at the number of RSS buckets */
 	if (queues > rss_getnumbuckets())
@@ -2688,7 +2686,9 @@ iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
 		sctx->isc_nqsets = queues;
 		sctx->isc_intr = IFLIB_INTR_MSIX;
 		return (vectors);
-	} /* else free msix table */
+	} else {
+		device_printf(dev, "failed to allocate msix vectors - using MSI\n");
+	}
 msi:
 	vectors = pci_msi_count(dev);
 	sctx->isc_nqsets = 1;
