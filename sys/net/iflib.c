@@ -434,6 +434,7 @@ _iflib_irq_alloc(iflib_ctx_t ctx, if_irq_t irq, int rid,
 		return (ENOMEM);
 	}
 
+	KASSERT(filter == NULL || handler == NULL, ("filter and handler can't both be non-NULL"));
 	rc = bus_setup_intr(dev, res, INTR_MPSAFE | INTR_TYPE_NET,
 						filter, handler, arg, &tag);
 	if (rc != 0) {
@@ -2424,7 +2425,7 @@ iflib_qset_addr_get(if_shared_ctx_t sctx, int qidx, caddr_t *vaddrs, uint64_t *p
 
 int
 iflib_irq_alloc(if_shared_ctx_t sctx, if_irq_t irq, int rid,
-				driver_filter_t filter, driver_intr_t handler, void *arg, char *name)
+				driver_filter_t filter, void *filter_arg, driver_intr_t handler, void *arg, char *name)
 {
 
 	return (_iflib_irq_alloc(sctx->isc_ctx, irq, rid, filter, handler, arg, name));
@@ -2494,7 +2495,7 @@ iflib_legacy_setup(if_shared_ctx_t sctx, driver_filter_t filter, void *filterarg
 
 	ctx->ifc_flags |= IFC_LEGACY;
 	/* We allocate a single interrupt resource */
-	if ((err = iflib_irq_alloc(sctx, irq, *rid, filter, filterarg, sctx, str)) != 0)
+	if ((err = iflib_irq_alloc(sctx, irq, *rid, filter, filterarg, NULL, sctx, str)) != 0)
 		return (err);
 
 	/*

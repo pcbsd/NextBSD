@@ -181,7 +181,7 @@ int iflib_qset_structures_setup(if_shared_ctx_t);
 
 int iflib_qset_addr_get(if_shared_ctx_t, int qidx, caddr_t *vaddrs, uint64_t *paddrs, int nqs);
 
-int iflib_irq_alloc(if_shared_ctx_t, if_irq_t, int, driver_filter_t, driver_intr_t, void *arg, char *name);
+int iflib_irq_alloc(if_shared_ctx_t, if_irq_t, int, driver_filter_t, void *filter_arg, driver_intr_t, void *arg, char *name);
 int iflib_irq_alloc_generic(if_shared_ctx_t ctx, if_irq_t irq, int rid,
 							intr_type_t type, driver_filter_t *filter,
 							void *filter_arg, int qid, char *name);
