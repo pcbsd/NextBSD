@@ -2087,7 +2087,7 @@ iflib_register(device_t dev, driver_t *driver)
 	iflib_ctx_t ctx;
 	if_t ifp;
 
-	ctx = malloc(sizeof(struct iflib_ctx), M_DEVBUF, M_WAITOK);
+	ctx = malloc(sizeof(struct iflib_ctx), M_DEVBUF, M_ZERO|M_WAITOK);
 	if (ctx == NULL)
 		return (ENOMEM);
 	CTX_LOCK_INIT(ctx, device_get_nameunit(dev));
@@ -2155,8 +2155,6 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 		goto fail;
 	}
 
-	ctx->ifc_qsets = qset;
-
 /* Allocate the TX ring struct memory */
 	if (!(txq =
 	    (iflib_txq_t) malloc(sizeof(struct iflib_txq) *
@@ -2174,6 +2172,10 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 		err = ENOMEM;
 		goto rx_fail;
 	}
+
+	ctx->ifc_qsets = qset;
+	ctx->ifc_txqs = txq;
+	ctx->ifc_rxqs = rxq;
 
 	/*
 	 * XXX handle allocation failure
@@ -2265,9 +2267,13 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 	return (0);
 err_rx_desc:
 err_tx_desc:
-	free(ctx->ifc_rxqs, M_DEVBUF);
+	if (ctx->ifc_rxqs != NULL)
+		free(ctx->ifc_rxqs, M_DEVBUF);
+	ctx->ifc_rxqs = NULL;
 rx_fail:
-	free(ctx->ifc_txqs, M_DEVBUF);
+	if (ctx->ifc_txqs != NULL)
+		free(ctx->ifc_txqs, M_DEVBUF);
+	ctx->ifc_txqs = NULL;
 fail:
 	return (err);
 }
@@ -2300,6 +2306,8 @@ iflib_tx_structures_free(if_shared_ctx_t sctx)
 	}
 	free(ctx->ifc_txqs, M_DEVBUF);
 	free(ctx->ifc_qsets, M_DEVBUF);
+	ctx->ifc_txqs = NULL;
+	ctx->ifc_qsets = NULL;
 	IFDI_QUEUES_FREE(sctx);
 }
 

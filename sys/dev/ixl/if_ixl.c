@@ -408,7 +408,8 @@ ixl_if_queues_free(if_shared_ctx_t sctx)
 	struct ixl_vsi *vsi = DOWNCAST(sctx);
 	struct ixl_queue *que;
 
-	que = vsi->queues;
+	if ((que = vsi->queues) == NULL)
+		return;
 	free(que->txr.tx_buffers, M_DEVBUF);
 	free(que, M_DEVBUF);
 }
@@ -586,6 +587,8 @@ ixl_attach(device_t dev)
 	hw->bus.func = pci_get_function(dev);
 
 	pf->vc_debug_lvl = 1;
+	hw->back = &pf->osdep;
+	pf->osdep.dev = dev;
 
 	/* Setup OS specific network interface */
 	if ((error = iflib_register(dev, &ixl_if_driver)) != 0) {
@@ -2246,7 +2249,6 @@ ixl_setup_stations(struct ixl_pf *pf)
 	vsi->hw = &pf->hw;
 	vsi->id = 0;
 	vsi->num_vlans = 0;
-	vsi->back = pf;
 
 	tsize = roundup2((ixl_ringsz * sizeof(struct i40e_tx_desc)) +
 					 sizeof(u32), DBA_ALIGN);
