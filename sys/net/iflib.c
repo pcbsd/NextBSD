@@ -328,6 +328,8 @@ iflib_dma_alloc(iflib_ctx_t ctx, bus_size_t size, iflib_dma_info_t dma,
 	if_shared_ctx_t sctx = ctx->ifc_sctx;
 	device_t dev = sctx->isc_dev;
 
+	KASSERT(sctx->isc_q_align != 0, ("alignment value not initialized"));
+
 	err = bus_dma_tag_create(bus_get_dma_tag(dev), /* parent */
 				sctx->isc_q_align, 0,	/* alignment, bounds */
 				BUS_SPACE_MAXADDR,	/* lowaddr */
@@ -479,7 +481,9 @@ iflib_txsd_alloc(iflib_txq_t txq)
 			       NULL,			/* lockfunc */
 			       NULL,			/* lockfuncarg */
 			       &txq->ift_desc_tag))) {
-		device_printf(dev,"Unable to allocate TX DMA tag\n");
+		device_printf(dev,"Unable to allocate TX DMA tag: %d\n", err);
+		device_printf(dev,"maxsize: %ld nsegments: %d maxsegsize: %ld\n",
+					  sctx->isc_tx_maxsize, sctx->isc_tx_nsegments, sctx->isc_tx_maxsegsize);
 		goto fail;
 	}
 
