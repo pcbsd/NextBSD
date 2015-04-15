@@ -943,8 +943,11 @@ iflib_init_locked(iflib_ctx_t ctx)
 	int i;
 
 	IFDI_INTR_DISABLE(sctx);
-	for (i = 0; i < sctx->isc_nqsets; i++, txq++)
+	for (i = 0; i < sctx->isc_nqsets; i++, txq++) {
+		mtx_lock(&txq->ift_mtx);
 		callout_stop(&txq->ift_timer);
+		mtx_unlock(&txq->ift_mtx);
+	}
 	IFDI_INIT(sctx);
 	if_setdrvflagbits(sctx->isc_ifp, IFF_DRV_RUNNING, 0);
 	IFDI_INTR_ENABLE(sctx);
@@ -1484,7 +1487,9 @@ iflib_txq_drain(struct buf_ring_sc *br, int avail, void *sc)
 	}
 	if (if_getdrvflags(ctx->ifc_sctx->isc_ifp) & IFF_DRV_OACTIVE) {
 		txq->ift_qstatus = IFLIB_QUEUE_IDLE;
+		mtx_lock(&txq->ift_mtx);
 		callout_stop(&txq->ift_timer);
+		mtx_unlock(&txq->ift_mtx);
 		return (0);
 	}
 	sent = 0;
@@ -1562,8 +1567,11 @@ _task_fn_admin(void *context, int pending)
 		return;
 
 	CTX_LOCK(ctx);
-	for (i = 0; i < sctx->isc_nqsets; i++, txq++)
+	for (i = 0; i < sctx->isc_nqsets; i++, txq++) {
+		mtx_lock(&txq->ift_mtx);
 		callout_stop(&txq->ift_timer);
+		mtx_unlock(&txq->ift_mtx);
+	}
 	IFDI_UPDATE_ADMIN_STATUS(sctx);
 	for (txq = ctx->ifc_txqs, i = 0; i < sctx->isc_nqsets; i++, txq++)
 		callout_reset_on(&txq->ift_timer, hz/2, iflib_timer, txq, txq->ift_timer.c_cpu);
