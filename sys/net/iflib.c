@@ -2148,7 +2148,8 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 	iflib_fl_t fl = NULL;
 	int i, j, err, txconf, rxconf;
 	iflib_dma_info_t ifdip;
-	int nfree_lists = sctx->isc_nfl ? sctx->isc_nfl : 1; 
+	int nfree_lists = sctx->isc_nfl ? sctx->isc_nfl : 1;
+	struct buf_ring_sc **brscp;
 	int nbuf_rings = 1; /* XXX determine dynamically */
 
 	if (!(qset =
@@ -2173,6 +2174,11 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 	    (iflib_rxq_t) malloc(sizeof(struct iflib_rxq) *
 	    nqsets, M_DEVBUF, M_NOWAIT | M_ZERO))) {
 		device_printf(dev, "Unable to allocate RX ring memory\n");
+		err = ENOMEM;
+		goto rx_fail;
+	}
+	if (!(brscp = malloc(sizeof(void *) * nbuf_rings * nqsets, M_DEVBUF, M_NOWAIT | M_ZERO))) {
+		device_printf(dev, "Unable to buf_ring_sc * memory\n");
 		err = ENOMEM;
 		goto rx_fail;
 	}
@@ -2224,6 +2230,7 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 
 		/* Allocate a buf ring */
 		brsc.brsc_sc = txq;
+		txq->ift_br = brscp + i*nbuf_rings;;
 		for (j = 0; j < nbuf_rings; j++)
 			if ((txq->ift_br[j] = buf_ring_sc_alloc(4096, M_DEVBUF,
 													M_WAITOK, &brsc)) == NULL) {
