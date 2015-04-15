@@ -1769,7 +1769,7 @@ iflib_if_ioctl(if_t ifp, u_long command, caddr_t data)
 			IFDI_INTR_DISABLE(sctx);
 			IFDI_MULTI_SET(sctx);
 			IFDI_INTR_ENABLE(sctx);
-			CTX_LOCK(ctx);
+			CTX_UNLOCK(ctx);
 		}
 		break;
 	case SIOCSIFMEDIA:
@@ -2617,6 +2617,7 @@ iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
 	device_t dev = sctx->isc_dev;
 	int vectors, queues, queuemsgs, msgs;
 	iflib_ctx_t ctx = sctx->isc_ctx;
+	int err;
 
 	/* Override by tuneable */
 	if (enable_msix == 0)
@@ -2662,8 +2663,8 @@ iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
 	queuemsgs = msgs - admincnt;
 	if (bus_get_cpus(dev, INTR_CPUS, &sctx->isc_cpus) == 0) {
 		queues = imin(CPU_COUNT(&sctx->isc_cpus), queuemsgs);
-		device_printf(dev, "pxm cpus: %d queue msgs: %d\n",
-					  CPU_COUNT(&sctx->isc_cpus), queuemsgs);
+		device_printf(dev, "pxm cpus: %d queue msgs: %d admincnt: %d\n",
+					  CPU_COUNT(&sctx->isc_cpus), queuemsgs, admincnt);
 #ifdef notyet
 		bind_queues = 1;
 #endif		
@@ -2679,7 +2680,7 @@ iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
 #endif
 
 	vectors = queues + admincnt;
-	if (pci_alloc_msix(dev, &vectors) == 0) {
+	if ((err = pci_alloc_msix(dev, &vectors)) == 0) {
 		device_printf(dev,
 					  "Using MSIX interrupts with %d vectors\n", vectors);
 		sctx->isc_vectors = vectors;
@@ -2687,7 +2688,7 @@ iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
 		sctx->isc_intr = IFLIB_INTR_MSIX;
 		return (vectors);
 	} else {
-		device_printf(dev, "failed to allocate msix vectors - using MSI\n");
+		device_printf(dev, "failed to allocate %d msix vectors, err: %d - using MSI\n", vectors, err);
 	}
 msi:
 	vectors = pci_msi_count(dev);
