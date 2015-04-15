@@ -471,6 +471,7 @@ struct ixl_vsi {
 #define pause_frames shared.isc_pause_frames
 #define common_stats shared.isc_common_stats
 #define max_frame_size shared.isc_max_frame_size
+#define num_queues shared.isc_nqsets
 
 	void 			*back;
 	struct i40e_hw		*hw;
@@ -479,7 +480,6 @@ struct ixl_vsi {
 	u16			vsi_num;
 	u16			msix_base;	/* station base MSIX vector */
 	u16			first_queue;
-	u16			num_queues;
 	u16			rx_itr_setting;
 	u16			tx_itr_setting;
 	struct ixl_queue	*queues;	/* head of queues */
