@@ -62,6 +62,7 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	${_libiconv_modules} \
 	libipsec \
 	libjail \
+	libjansson \
 	libkiconv \
 	libkvm \
 	${_liblaunch} \
