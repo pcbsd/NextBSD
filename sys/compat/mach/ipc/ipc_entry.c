@@ -151,6 +151,23 @@ mach_port_fill_kinfo(struct file *fp __unused, struct kinfo_file *kif __unused,
 	return (0);
 }
 
+
+
+/*
+ *	Routine:	ipc_entry_release
+ *	Purpose:
+ *		Drops a reference to an entry.
+ *	Conditions:
+ *		The space must be locked.
+ */
+
+void
+ipc_entry_release(ipc_entry_t entry)
+{
+
+	fdrop(entry->ie_fp, curthread);
+}
+
 /*
  *	Routine:	ipc_entry_lookup
  *	Purpose:
@@ -175,6 +192,7 @@ ipc_entry_lookup(ipc_space_t space, mach_port_name_t name)
 	}
 	if (fp->f_type != DTYPE_MACH_IPC) {
 		log(LOG_DEBUG, "port name: %d is not MACH\n", name);
+		fdrop(fp, curthread);
 		return (NULL);
 	}
 	return (fp->f_data);
