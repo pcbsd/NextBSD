@@ -41,7 +41,6 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	${_libcom_err} \
 	libcompat \
 	libcrypt \
-	${_libcfxlite} \
 	libdevctl \
 	libdevinfo \
 	libdevstat \
