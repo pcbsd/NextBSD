@@ -433,7 +433,7 @@ _iflib_irq_alloc(iflib_ctx_t ctx, if_irq_t irq, int rid,
 		    "failed to allocate IRQ for rid %d, name %s.\n", rid, name);
 		return (ENOMEM);
 	}
-
+	irq->ii_res = res;
 	KASSERT(filter == NULL || handler == NULL, ("filter and handler can't both be non-NULL"));
 	rc = bus_setup_intr(dev, res, INTR_MPSAFE | INTR_TYPE_NET,
 						filter, handler, arg, &tag);
@@ -441,11 +441,11 @@ _iflib_irq_alloc(iflib_ctx_t ctx, if_irq_t irq, int rid,
 		device_printf(dev,
 		    "failed to setup interrupt for rid %d, name %s: %d\n",
 					  rid, name ? name : "unknown", rc);
+		return (rc);
 	} else if (name)
 		bus_describe_intr(dev, res, tag, name);
 
 	irq->ii_tag = tag;
-	irq->ii_res = res;
 	return (0);
 }
 
@@ -2484,6 +2484,18 @@ iflib_irq_alloc_generic(if_shared_ctx_t sctx, if_irq_t irq, int rid,
 	return (0);
 }
 
+void
+iflib_irq_free(if_shared_ctx_t sctx, if_irq_t irq)
+{
+	if (irq->ii_tag)
+		bus_teardown_intr(sctx->isc_dev, irq->ii_res, irq->ii_tag);
+
+	if (irq->ii_res)
+		bus_release_resource(sctx->isc_dev, SYS_RES_IRQ, irq->ii_rid, irq->ii_res);
+
+	/* taskqgroup_detach() */
+}
+
 int
 iflib_legacy_setup(if_shared_ctx_t sctx, driver_filter_t filter, void *filterarg, int *rid, char *str)
 {
@@ -2612,7 +2624,7 @@ iflib_sctx_lock_get(if_shared_ctx_t sctx)
 }
 
 int
-iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
+iflib_msix_init(if_shared_ctx_t sctx, int bar, int admincnt)
 {
 	device_t dev = sctx->isc_dev;
 	int vectors, queues, queuemsgs, msgs;
@@ -2633,7 +2645,9 @@ iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
 	*/
 	{
 		uint16_t pci_cmd_word;
-		int msix_ctrl;
+		int msix_ctrl, rid;
+
+		rid = 0;
 		pci_cmd_word = pci_read_config(dev, PCIR_COMMAND, 2);
 		pci_cmd_word |= PCIM_CMD_BUSMASTEREN;
 		pci_write_config(dev, PCIR_COMMAND, pci_cmd_word, 2);
@@ -2646,7 +2660,7 @@ iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
 
 	/* First try MSI/X */
 	ctx->ifc_msix_mem = bus_alloc_resource_any(dev,
-	    SYS_RES_MEMORY, &rid, RF_ACTIVE);
+	    SYS_RES_MEMORY, &bar, RF_ACTIVE);
 	if (ctx->ifc_msix_mem == NULL) {
 		/* May not be enabled */
 		device_printf(dev, "Unable to map MSIX table \n");
@@ -2656,7 +2670,7 @@ iflib_msix_init(if_shared_ctx_t sctx, int rid, int admincnt)
 	if ((msgs = pci_msix_count(dev)) == 0) { /* system has msix disabled */
 		device_printf(dev, "System has MSIX disabled \n");
 		bus_release_resource(dev, SYS_RES_MEMORY,
-		    rid, ctx->ifc_msix_mem);
+		    bar, ctx->ifc_msix_mem);
 		ctx->ifc_msix_mem = NULL;
 		goto msi;
 	}

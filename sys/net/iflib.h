@@ -186,6 +186,8 @@ int iflib_irq_alloc_generic(if_shared_ctx_t ctx, if_irq_t irq, int rid,
 							intr_type_t type, driver_filter_t *filter,
 							void *filter_arg, int qid, char *name);
 
+void iflib_irq_free(if_shared_ctx_t sctx, if_irq_t irq);
+
 int iflib_legacy_setup(if_shared_ctx_t sctx, driver_filter_t filter, void *filterarg, int *rid, char *str);
 void iflib_led_create(if_shared_ctx_t sctx);
 

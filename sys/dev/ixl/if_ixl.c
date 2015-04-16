@@ -1554,6 +1554,7 @@ ixl_assign_vsi_msix(struct ixl_pf *pf)
 	err = iflib_irq_alloc_generic(sctx, &vsi->irq, rid, IFLIB_INTR_ADMIN,
 								  ixl_msix_adminq, pf, 0, "aq");
 	if (err) {
+		iflib_irq_free(sctx, &vsi->irq);
 		device_printf(sctx->isc_dev, "Failed to register Admin que handler");
 		return (err);
 	}
@@ -1572,13 +1573,22 @@ ixl_assign_vsi_msix(struct ixl_pf *pf)
 		rid = vector + 1;
 
 		snprintf(buf, sizeof(buf), "q%d", i);
-		err = iflib_irq_alloc_generic(UPCAST(vsi), &que->que_irq, rid, IFLIB_INTR_RX,
+		err = iflib_irq_alloc_generic(sctx, &que->que_irq, rid, IFLIB_INTR_RX,
 									  ixl_msix_que, que, que->me, buf);
+		if (err) {
+			device_printf(sctx->isc_dev, "Failed to allocate q int %d err: %d", i, err);
+			vsi->num_queues = i + 1;
+			goto fail;
+		}
 		que->msix = vector;
 	}
 	return (0);
+fail:
+	que = vsi->queues;
+	for (int i = 0; i < vsi->num_queues; i++, que++)
+		iflib_irq_free(sctx, &que->que_irq);
+	return (err);
 }
-
 
 /*
  * Allocate MSI/X vectors
@@ -1586,10 +1596,8 @@ ixl_assign_vsi_msix(struct ixl_pf *pf)
 static int
 ixl_init_msix(struct ixl_pf *pf)
 {
-	int rid;
 
-	rid = PCIR_BAR(IXL_BAR);
-	return (iflib_msix_init(UPCAST(pf), rid, 1));
+	return (iflib_msix_init(UPCAST(pf), PCIR_BAR(IXL_BAR), 1));
 }
 
 
@@ -1792,16 +1800,8 @@ ixl_free_pci_resources(struct ixl_pf * pf)
 	/*
 	**  Release all msix VSI resources:
 	*/
-	for (int i = 0; i < vsi->num_queues; i++, que++) {
-		rid = que->msix + 1;
-		if (que->tag != NULL) {
-			bus_teardown_intr(dev, que->res, que->tag);
-			que->tag = NULL;
-		}
-		if (que->res != NULL)
-			bus_release_resource(dev, SYS_RES_IRQ, rid, que->res);
-	}
-
+	for (int i = 0; i < vsi->num_queues; i++, que++)
+		iflib_irq_free(UPCAST(pf), &que->que_irq);
 early:
 	/* Clean the AdminQ interrupt last */
 	if (pf->admvec) /* we are doing MSIX */
