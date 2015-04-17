@@ -204,7 +204,8 @@ struct iflib_txq {
 	struct callout	ift_timer;
 
 	struct mtx              ift_mtx;
-	char                    ift_mtx_name[16];
+#define MTX_NAME_LEN 16
+	char                    ift_mtx_name[MTX_NAME_LEN];
 	int                     ift_id;
 	iflib_sd_t              ift_sds;
 	int                     ift_nbr;
@@ -256,7 +257,7 @@ struct iflib_rxq {
 	uint8_t		ifr_nfl;
 	struct lro_ctrl			ifr_lc;
 	struct mtx				ifr_mtx;
-	char                    ifr_mtx_name[16];
+	char                    ifr_mtx_name[MTX_NAME_LEN];
 	struct grouptask        ifr_task;
 	bus_dma_tag_t           ifr_desc_tag;
 	iflib_dma_info_t		ifr_ifdi;
@@ -2161,6 +2162,9 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 	struct buf_ring_sc **brscp;
 	int nbuf_rings = 1; /* XXX determine dynamically */
 
+
+	KASSERT(nqs > 0, ("number of queues must be at least 1"));
+
 	if (!(qset =
 	    (iflib_qset_t) malloc(sizeof(struct iflib_qset) *
 	    nqsets, M_DEVBUF, M_NOWAIT | M_ZERO))) {
@@ -2200,10 +2204,11 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 	 * XXX handle allocation failure
 	 */
 	for (qset = ctx->ifc_qsets, rxconf = txconf = i = 0; i < nqsets;
-		 i++, txconf++, rxconf++, qset++) {
+		 i++, txconf++, rxconf++, qset++, txq++, rxq++) {
 		/* Set up some basics */
 
 		if ((ifdip = malloc(sizeof(struct iflib_dma_info) * nqs, M_DEVBUF, M_WAITOK)) == NULL) {
+			device_printf(dev, "failed to allocate iflib_dma_info\n");
 			err = ENOMEM;
 			goto fail;
 		}
@@ -2217,9 +2222,9 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 			}
 			bzero((void *)ifdip->idi_vaddr, qsizes[j]);
 		}
-		txq = &ctx->ifc_txqs[i];
 		txq->ift_ctx = ctx;
 		txq->ift_id = i;
+		/* XXX fix this */
 		txq->ift_timer.c_cpu = i % mp_ncpus;
 		txq->ift_nbr = nbuf_rings;
 		txq->ift_ifdi = &qset->ifq_ifdi[0];
@@ -2232,7 +2237,7 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 		}
 
 		/* Initialize the TX lock */
-		snprintf(txq->ift_mtx_name, sizeof(txq->ift_mtx_name), "%s:tx(%d)",
+		snprintf(txq->ift_mtx_name, MTX_NAME_LEN, "%s:tx(%d)",
 		    device_get_nameunit(dev), txq->ift_id);
 		mtx_init(&txq->ift_mtx, txq->ift_mtx_name, NULL, MTX_DEF);
 		callout_init_mtx(&txq->ift_timer, &txq->ift_mtx, 0);
@@ -2250,7 +2255,6 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 		/*
      * Next the RX queues...
 	 */
-		rxq = &ctx->ifc_rxqs[i];
 		rxq->ifr_ctx = ctx;
 		rxq->ifr_id = i;
 		rxq->ifr_ifdi = &qset->ifq_ifdi[1];
@@ -2275,7 +2279,7 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 		}
 
 		/* Initialize the RX lock */
-		snprintf(rxq->ifr_mtx_name, sizeof(rxq->ifr_mtx_name), "%s:rx(%d)",
+		snprintf(rxq->ifr_mtx_name, MTX_NAME_LEN, "%s:rx(%d)",
 		    device_get_nameunit(dev), rxq->ifr_id);
 		mtx_init(&rxq->ifr_mtx, rxq->ifr_mtx_name, NULL, MTX_DEF);
 	}
