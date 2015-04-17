@@ -215,6 +215,7 @@ taskqueue_enqueue_locked(struct taskqueue *queue, struct task *task)
 	struct task *ins;
 	struct task *prev;
 
+	KASSERT(task->ta_func != NULL, ("enqueueing task with NULL func"));
 	/*
 	 * Count multiple enqueues.
 	 */
