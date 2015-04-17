@@ -1156,7 +1156,8 @@ iflib_rxeof(iflib_rxq_t rxq, int budget)
 	if (sctx->isc_txd_credits_update != NULL) {
 		qsid = rxq->ifr_id;
 		txq = &ctx->ifc_txqs[qsid];
-		if (sctx->isc_txd_credits_update(sctx, qsid, txq->ift_cidx))
+		if (txq->ift_cidx != txq->ift_pidx &&
+			sctx->isc_txd_credits_update(sctx, qsid, txq->ift_cidx))
 			GROUPTASK_ENQUEUE(&txq->ift_task);
 	}
 
