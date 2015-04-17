@@ -370,7 +370,7 @@ ixl_if_queues_alloc(if_shared_ctx_t sctx)
 	struct ixl_vsi *vsi = DOWNCAST(sctx);
 	struct ixl_queue *que;
 	struct ixl_tx_buf *bufs;
-	int i;
+	int i, err;
 
 	/* Allocate queue structure memory */
 	if (!(vsi->queues =
@@ -379,7 +379,7 @@ ixl_if_queues_alloc(if_shared_ctx_t sctx)
 		device_printf(sctx->isc_dev, "Unable to allocate TX ring memory\n");
 		return (ENOMEM);
 	}
-	if (!(bufs = malloc(sizeof(*bufs)*sctx->isc_ntxd*vsi->num_queues, M_DEVBUF, M_WAITOK|M_ZERO))) {
+	if ((bufs = malloc(sizeof(*bufs)*sctx->isc_ntxd*vsi->num_queues, M_DEVBUF, M_WAITOK|M_ZERO)) == NULL) {
 		free(vsi->queues, M_DEVBUF);
 		device_printf(sctx->isc_dev, "failed to allocate sw bufs\n");
 		return (ENOMEM);
@@ -391,7 +391,9 @@ ixl_if_queues_alloc(if_shared_ctx_t sctx)
 		que->me = i;
 
 		/* get the virtual and physical address of the hardware queues */
-		iflib_qset_addr_get(sctx, i, vaddrs, paddrs, 2);
+		err = iflib_qset_addr_get(sctx, i, vaddrs, paddrs, 2);
+		KASSERT(err == 0, ("failed to fetch {v,p}addrs for HW queues"));
+
 		que->txr.tx_base = (struct i40e_tx_desc *)vaddrs[0];
 		que->txr.tx_paddr = paddrs[0];
 		que->rxr.rx_base = (union i40e_rx_desc *)vaddrs[1];

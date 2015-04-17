@@ -2421,6 +2421,8 @@ iflib_qset_addr_get(if_shared_ctx_t sctx, int qidx, caddr_t *vaddrs, uint64_t *p
 	if (nqs != nhwqs)
 		return (EINVAL);
 	for (i = 0; i < nhwqs; i++, di++) {
+		KASSERT(di->idi_vaddr != NULL, ("NULL dma vaddr"));
+		KASSERT(di->idi_paddr != 0, ("NULL dma paddr"));
 		vaddrs[i] = di->idi_vaddr;
 		paddrs[i] = di->idi_paddr;
 	}
