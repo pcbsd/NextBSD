@@ -2442,6 +2442,7 @@ iflib_irq_alloc_generic(if_shared_ctx_t sctx, if_irq_t irq, int rid,
 	struct grouptask *gtask;
 	struct taskqgroup *tqg;
 	iflib_filter_info_t info;
+	task_fn_t *fn;
 	int tqrid;
 	void *q;
 	int err;
@@ -2453,6 +2454,7 @@ iflib_irq_alloc_generic(if_shared_ctx_t sctx, if_irq_t irq, int rid,
 		gtask = &ctx->ifc_txqs[qid].ift_task;
 		tqg = gctx->igc_io_tqg;
 		tqrid = irq->ii_rid;
+		fn = _task_fn_tx;
 		break;
 	case IFLIB_INTR_RX:
 		q = &ctx->ifc_rxqs[qid];
@@ -2460,6 +2462,7 @@ iflib_irq_alloc_generic(if_shared_ctx_t sctx, if_irq_t irq, int rid,
 		gtask = &ctx->ifc_rxqs[qid].ifr_task;
 		tqg = gctx->igc_io_tqg;
 		tqrid = irq->ii_rid;
+		fn = _task_fn_rx;
 		break;
 	case IFLIB_INTR_ADMIN:
 		q = ctx;
@@ -2467,10 +2470,13 @@ iflib_irq_alloc_generic(if_shared_ctx_t sctx, if_irq_t irq, int rid,
 		gtask = &ctx->ifc_admin_task;
 		tqg = gctx->igc_config_tqg;
 		tqrid = -1;
+		fn = _task_fn_admin;
 		break;
 	default:
 		panic("unknown net intr type");
 	}
+	GROUPTASK_INIT(gtask, 0, fn, q);
+
 	info->ifi_filter = filter;
 	info->ifi_filter_arg = filter_arg;
 	info->ifi_task = gtask;
