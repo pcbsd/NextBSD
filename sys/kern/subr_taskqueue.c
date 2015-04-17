@@ -423,6 +423,7 @@ taskqueue_run_locked(struct taskqueue *queue)
 	struct task *task;
 	int pending;
 
+	KASSERT(queue != NULL, ("tq is NULL"));
 	TQ_ASSERT_LOCKED(queue);
 	tb.tb_running = NULL;
 
@@ -434,12 +435,14 @@ taskqueue_run_locked(struct taskqueue *queue)
 		 * zero its pending count.
 		 */
 		task = STAILQ_FIRST(&queue->tq_queue);
+		KASSERT(task != NULL, ("task is NULL"));
 		STAILQ_REMOVE_HEAD(&queue->tq_queue, ta_link);
 		pending = task->ta_pending;
 		task->ta_pending = 0;
 		tb.tb_running = task;
 		TQ_UNLOCK(queue);
 
+		KASSERT(task->ta_func != NULL, ("task->ta_func is NULL"));
 		task->ta_func(task->ta_context, pending);
 
 		TQ_LOCK(queue);
