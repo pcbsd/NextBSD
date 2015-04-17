@@ -693,6 +693,7 @@ taskqueue_thread_loop(void *arg)
 	taskqueue_run_callback(tq, TASKQUEUE_CALLBACK_TYPE_INIT);
 	TQ_LOCK(tq);
 	while ((tq->tq_flags & TQ_FLAGS_ACTIVE) != 0) {
+		/* XXX ? */
 		taskqueue_run_locked(tq);
 		/*
 		 * Because taskqueue_run() can drop tq_mutex, we need to
@@ -964,8 +965,8 @@ _taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride)
 
 	mtx_assert(&qgroup->tqg_lock, MA_OWNED);
 
-	if (cnt < 1 || cnt * stride >= mp_ncpus || !smp_started) {
-		printf("taskqgroup_adjust failed cnt: %d stride: %d mp_ncpus: %d smp_started:% d\n",
+	if (cnt < 1 || cnt * stride > mp_ncpus || !smp_started) {
+		printf("taskqgroup_adjust failed cnt: %d stride: %d mp_ncpus: %d smp_started: %d\n",
 			   cnt, stride, mp_ncpus, smp_started);
 		return (EINVAL);
 	}
