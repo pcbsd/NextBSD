@@ -340,6 +340,7 @@ buf_ring_sc_drain(struct buf_ring_sc *br, int budget)
 	br_state state;
 	int pending;
 
+	KASSERT(budget >= 0, ("calling drain with invalid budget"));
 	critical_enter();
 	if (br->br_domain == PCPU_GET(domain))
 		sched_pin();
@@ -350,9 +351,10 @@ buf_ring_sc_drain(struct buf_ring_sc *br, int budget)
 	}
 	critical_exit();
 
-	if (__predict_false(budget == 0))
+	if (__predict_false(budget == 0)) {
 		buf_ring_sc_lock(br);
-	else if (!buf_ring_sc_trylock(br)) {
+		budget = br->br_size;
+	} else if (!buf_ring_sc_trylock(br)) {
 		if (br->br_domain == PCPU_GET(domain))
 			sched_unpin();
 		return;
