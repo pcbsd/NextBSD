@@ -826,6 +826,7 @@ taskqgroup_cpu_create(struct taskqgroup *qgroup, int idx)
 	taskqueue_start_threads(&qcpu->tgc_taskq, 1, PI_SOFT,
 	    "%s_%d", qgroup->tqg_name, idx);
 	qcpu->tgc_cpu = idx * qgroup->tqg_stride;
+	printf("created taskqgroup on %d\n", idx);
 }
 
 static void
@@ -963,10 +964,15 @@ _taskqgroup_adjust(struct taskqgroup *qgroup, int cnt, int stride)
 
 	mtx_assert(&qgroup->tqg_lock, MA_OWNED);
 
-	if (cnt < 1 || cnt * stride >= mp_ncpus || !smp_started)
+	if (cnt < 1 || cnt * stride >= mp_ncpus || !smp_started) {
+		printf("taskqgroup_adjust failed cnt: %d stride: %d mp_ncpus: %d smp_started:% d\n",
+			   cnt, stride, mp_ncpus, smp_started);
 		return (EINVAL);
-	if (qgroup->tqg_adjusting)
+	}
+	if (qgroup->tqg_adjusting) {
+		printf("taskqgroup_adjust failed: adjusting\n");
 		return (EBUSY);
+	}
 	qgroup->tqg_adjusting = 1;
 	old_cnt = qgroup->tqg_cnt;
 	mtx_unlock(&qgroup->tqg_lock);
