@@ -2152,9 +2152,9 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 	iflib_ctx_t ctx = sctx->isc_ctx;
 	device_t dev = sctx->isc_dev;
 	int nqsets = sctx->isc_nqsets;
-	iflib_txq_t txq = NULL;
-	iflib_rxq_t rxq = NULL;
-	iflib_qset_t qset = NULL;
+	iflib_txq_t txq;
+	iflib_rxq_t rxq;
+	iflib_qset_t qset;
 	iflib_fl_t fl = NULL;
 	int i, j, err, txconf, rxconf;
 	iflib_dma_info_t ifdip;
@@ -2283,8 +2283,6 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 		    device_get_nameunit(dev), rxq->ifr_id);
 		mtx_init(&rxq->ifr_mtx, rxq->ifr_mtx_name, NULL, MTX_DEF);
 	}
-	ctx->ifc_txqs = txq;
-	ctx->ifc_rxqs = rxq;
 	if ((err = IFDI_QUEUES_ALLOC(sctx)) != 0)
 		iflib_tx_structures_free(sctx);
 
