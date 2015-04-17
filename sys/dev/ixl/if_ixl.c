@@ -379,8 +379,9 @@ ixl_if_queues_alloc(if_shared_ctx_t sctx)
 		device_printf(sctx->isc_dev, "Unable to allocate TX ring memory\n");
 		return (ENOMEM);
 	}
-	if (!(bufs = malloc(sizeof(*bufs)*sctx->isc_ntxd*vsi->num_queues, M_DEVBUF, M_NOWAIT|M_ZERO))) {
+	if (!(bufs = malloc(sizeof(*bufs)*sctx->isc_ntxd*vsi->num_queues, M_DEVBUF, M_WAITOK|M_ZERO))) {
 		free(vsi->queues, M_DEVBUF);
+		device_printf(sctx->isc_dev, "failed to allocate sw bufs\n");
 		return (ENOMEM);
 	}
 	
@@ -398,6 +399,8 @@ ixl_if_queues_alloc(if_shared_ctx_t sctx)
 		que->txr.que = que->rxr.que = que;
 		que->txr.tx_buffers = bufs + i*sctx->isc_ntxd;
 	}
+	/* XXX */
+	device_printf(sctx->isc_dev, "allocated for %d queues\n", vsi->num_queues);
 	return (0);
 }
 

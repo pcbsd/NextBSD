@@ -2283,9 +2283,11 @@ iflib_queues_alloc(if_shared_ctx_t sctx, uint32_t *qsizes, uint8_t nqs)
 		    device_get_nameunit(dev), rxq->ifr_id);
 		mtx_init(&rxq->ifr_mtx, rxq->ifr_mtx_name, NULL, MTX_DEF);
 	}
-	if ((err = IFDI_QUEUES_ALLOC(sctx)) != 0)
+	if ((err = IFDI_QUEUES_ALLOC(sctx)) != 0) {
+		device_printf(sctx->isc_dev, "device queue allocation failed\n");
 		iflib_tx_structures_free(sctx);
-
+		return (err);
+	}
 	return (0);
 err_rx_desc:
 err_tx_desc:
