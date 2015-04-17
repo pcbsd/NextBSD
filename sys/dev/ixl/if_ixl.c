@@ -2268,16 +2268,8 @@ ixl_setup_stations(struct ixl_pf *pf)
 		error = ENOMEM;
 		goto early;
 	}
-	 if (!(vsi->queues =
-		   (struct ixl_queue *) malloc(sizeof(struct ixl_queue) *
-									   ixl_ringsz, M_DEVBUF, M_NOWAIT | M_ZERO))) {
-		 device_printf(dev, "Unable to allocate queue memory\n");
-		 error = ENOMEM;
-		 goto early;
-	 }
-
-	for (int i = 0; i < vsi->num_queues; i++) {
-		que = &vsi->queues[i];
+	que = vsi->queues;
+	for (int i = 0; i < vsi->num_queues; i++, que++) {
 		que->me = i;
 		que->vsi = vsi;
 		/* mark the queue as active */
