@@ -642,48 +642,43 @@ iflib_rxsd_alloc(iflib_rxq_t rxq)
 	iflib_sd_t	rxsd;
 	int			err;
 
-	fl = malloc(sizeof(struct iflib_fl) *
-	    1, M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (fl == NULL) {
-		device_printf(dev, "Unable to allocate free list memory\n");
-		return (ENOMEM);
-	}
-	fl->ifl_sds = malloc(sizeof(struct iflib_sw_desc) *
-	    sctx->isc_nrxd, M_DEVBUF, M_NOWAIT | M_ZERO);
-	if (fl->ifl_sds == NULL) {
-		device_printf(dev, "Unable to allocate rx sw desc memory\n");
-		return (ENOMEM);
-	}
-	fl->ifl_rxq = rxq;
-	fl->ifl_size = sctx->isc_nrxd; /* this isn't necessarily the same */
-	err = bus_dma_tag_create(bus_get_dma_tag(dev), /* parent */
-				1, 0,			/* alignment, bounds */
-				BUS_SPACE_MAXADDR,	/* lowaddr */
-				BUS_SPACE_MAXADDR,	/* highaddr */
-				NULL, NULL,		/* filter, filterarg */
-				sctx->isc_rx_maxsize,	/* maxsize */
-				sctx->isc_rx_nsegments,	/* nsegments */
-				sctx->isc_rx_maxsegsize,	/* maxsegsize */
-				0,			/* flags */
-				NULL,			/* lockfunc */
-				NULL,			/* lockarg */
-				&rxq->ifr_desc_tag);
-	if (err) {
-		device_printf(dev, "%s: bus_dma_tag_create failed %d\n",
-		    __func__, err);
-		goto fail;
-	}
-
-	rxsd = fl->ifl_sds;
-	for (int i = 0; i < sctx->isc_nrxd; i++, rxsd++) {
-		err = bus_dmamap_create(rxq->ifr_desc_tag, 0, &rxsd->ifsd_map);
+	fl = rxq->ifr_fl;
+	for (int i = 0; i <  rxq->ifr_nfl; i++, fl++) {
+		fl->ifl_sds = malloc(sizeof(struct iflib_sw_desc) *
+							 sctx->isc_nrxd, M_DEVBUF, M_WAITOK | M_ZERO);
+		if (fl->ifl_sds == NULL) {
+			device_printf(dev, "Unable to allocate rx sw desc memory\n");
+			return (ENOMEM);
+		}
+		fl->ifl_size = sctx->isc_nrxd; /* this isn't necessarily the same */
+		err = bus_dma_tag_create(bus_get_dma_tag(dev), /* parent */
+								 1, 0,			/* alignment, bounds */
+								 BUS_SPACE_MAXADDR,	/* lowaddr */
+								 BUS_SPACE_MAXADDR,	/* highaddr */
+								 NULL, NULL,		/* filter, filterarg */
+								 sctx->isc_rx_maxsize,	/* maxsize */
+								 sctx->isc_rx_nsegments,	/* nsegments */
+								 sctx->isc_rx_maxsegsize,	/* maxsegsize */
+								 0,			/* flags */
+								 NULL,			/* lockfunc */
+								 NULL,			/* lockarg */
+								 &rxq->ifr_desc_tag);
 		if (err) {
-			device_printf(dev, "%s: bus_dmamap_create failed: %d\n",
-			    __func__, err);
+			device_printf(dev, "%s: bus_dma_tag_create failed %d\n",
+				__func__, err);
 			goto fail;
 		}
-	}
 
+		rxsd = fl->ifl_sds;
+		for (int i = 0; i < sctx->isc_nrxd; i++, rxsd++) {
+			err = bus_dmamap_create(rxq->ifr_desc_tag, 0, &rxsd->ifsd_map);
+			if (err) {
+				device_printf(dev, "%s: bus_dmamap_create failed: %d\n",
+					__func__, err);
+				goto fail;
+			}
+		}
+	}
 	return (0);
 
 fail:
