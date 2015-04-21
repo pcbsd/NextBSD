@@ -132,8 +132,6 @@ typedef union prod_state_ {
 #define BR_INDEX(x) ((x) & BR_RING_MASK)
 #define BR_HANDOFF(br) ((br)->br_cons & (BR_RING_ABDICATING|BR_RING_IDLE))
 #define BR_STALLED(br) ((br)->br_cons & BR_RING_STALLED)
-#define BR_PENDING      (1<<0)
-#define BR_OWNED        (1<<1)
 #define BR_RING_PENDING (1<<30)
 #define BR_RING_OWNED   (1<<31)
 
@@ -307,6 +305,7 @@ buf_ring_sc_drain_locked(struct buf_ring_sc *br, int budget)
 	br_state state;
 
 	KASSERT(budget > 0, ("calling drain with invalid budget"));
+	MPASS(br->br_prod_value & BR_RING_OWNED);
 	state = BR_IDLE;
 	while (cidx != pidx) {
 		if ((avail = pidx - cidx) < 0)
@@ -486,7 +485,7 @@ buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int budget)
 	 * drops the lock before we can do that then the lock will be
 	 * re-acquired normally
 	 */
-	while (BR_HANDOFF(br) && state.ps_flags == BR_OWNED && budget > 0 && domainvalid) {
+	while (BR_HANDOFF(br) && (state.ps_value & BR_RING_OWNED) == BR_RING_OWNED && budget > 0 && domainvalid) {
 		prod_head = br->br_prod_head;
 		pidx = BR_INDEX(prod_head);
 		cons = br->br_cons;
@@ -504,7 +503,7 @@ buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int budget)
 		}
 		value = state.ps_value;
 		pidx = (pidx + count) & br->br_mask;
-		state.ps_flags |= BR_PENDING;
+		state.ps_value |= BR_RING_PENDING;
 		state.ps_head = pidx;
 		if (atomic_cmpset_acq_32(&br->br_prod_value, value, state.ps_value)) {
 			pending = true;
@@ -563,7 +562,7 @@ buf_ring_sc_enqueue(struct buf_ring_sc *br, void *ents[], int count, int budget)
 	 * the owned bit
 	 */
 	if (pending) {
-		while ((br->br_prod_flags & BR_OWNED) == BR_OWNED)
+		while ((br->br_prod_value & BR_RING_OWNED) == BR_RING_OWNED)
 			cpu_spinwait();
 		atomic_set_acq_32(&br->br_prod_value, BR_RING_OWNED);
 		rc = EOWNED;
@@ -611,7 +610,7 @@ buf_ring_sc_peek(struct buf_ring_sc *br, void *ents[], uint16_t count)
 	int i, avail;
 
 	KASSERT(count > 0, ("peeking for zero entries"));
-	KASSERT(br->br_prod_flags == BR_OWNED, ("peeking without lock being held"));
+	KASSERT((br->br_prod_value & BR_RING_OWNED) == BR_RING_OWNED, ("peeking without lock being held"));
 	/*
 	 * for correctness prod_tail must be read before ring[cons]
 	 */
@@ -739,18 +738,16 @@ buf_ring_sc_full(struct buf_ring_sc *br)
 static void
 buf_ring_sc_lock(struct buf_ring_sc *br)
 {
-	uint32_t value, new_value;
+	uint32_t value;
 
 	do {
 		while ((value = br->br_prod_value) & BR_RING_PENDING)
 			cpu_spinwait();
-		new_value = value | BR_RING_PENDING;
-	} while (!atomic_cmpset_acq_32(&br->br_prod_value, value, new_value));
+	} while (!atomic_cmpset_acq_32(&br->br_prod_value, value, value | BR_RING_PENDING));
 	do {
 		while ((value = br->br_prod_value) & BR_RING_OWNED)
 			cpu_spinwait();
-		new_value = value | BR_RING_OWNED;
-	} while (!atomic_cmpset_acq_32(&br->br_prod_value, value, new_value));
+	} while (!atomic_cmpset_acq_32(&br->br_prod_value, value, value | BR_RING_OWNED));
 	if (br->br_cons & BR_RING_IDLE)
 		counter_u64_add(br->br_starts, 1);
 	else if (br->br_cons & BR_RING_STALLED)
@@ -763,13 +760,12 @@ buf_ring_sc_lock(struct buf_ring_sc *br)
 static int
 buf_ring_sc_trylock(struct buf_ring_sc *br)
 {
-	uint32_t value, new_value;
+	uint32_t value;
 
 	do {
 		if ((value = br->br_prod_value) & (BR_RING_OWNED|BR_RING_PENDING))
 			return (0);
-		new_value = value | BR_RING_OWNED;
-	} while (!atomic_cmpset_acq_32(&br->br_prod_value, value, new_value));
+	} while (!atomic_cmpset_acq_32(&br->br_prod_value, value, value | BR_RING_OWNED));
 
 	if (br->br_cons & BR_RING_IDLE)
 		counter_u64_add(br->br_starts, 1);
@@ -786,7 +782,7 @@ buf_ring_sc_unlock(struct buf_ring_sc *br, br_state reason)
 	uint32_t prod_value, cons_next;
 	int pending;
 
-	KASSERT(br->br_prod_flags & BR_OWNED, ("unlocking unowned ring"));
+	KASSERT(br->br_prod_value & BR_RING_OWNED, ("unlocking unowned ring"));
 	/*
 	 * we treat IDLE the same as ABDICATE to avoid a race
 	 * with enqueue - they only differ for purposes of stats
@@ -811,8 +807,8 @@ buf_ring_sc_unlock(struct buf_ring_sc *br, br_state reason)
 		panic("invalid unlock state");
 	do {
 		prod_value = state.ps_value = br->br_prod_value;
-		pending = !!(state.ps_flags & BR_PENDING);
-		state.ps_flags &= ~BR_OWNED;
+		pending = !!(state.ps_value & BR_RING_PENDING);
+		state.ps_value &= ~BR_RING_OWNED;
 	} while (!atomic_cmpset_rel_32(&br->br_prod_value, prod_value, state.ps_value));
 	critical_exit();
 	return (pending);
