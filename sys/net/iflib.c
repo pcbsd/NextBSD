@@ -769,6 +769,9 @@ batch_start:
 		if (++i == 256)
 			break;
 	}
+	MPASS(fl->ifl_rxq != NULL);
+	device_printf(sctx->isc_dev, "calling rxd_refill qid=%d pidx=%d i=%d\n", fl->ifl_rxq->ifr_id, pidx, i);
+	pause("debug", 10);
 	sctx->isc_rxd_refill(sctx, fl->ifl_rxq->ifr_id, fl->ifl_id, pidx,
 						 fl->ifl_phys_addrs, fl->ifl_vm_addrs, i);
 	fl->ifl_credits += i;
@@ -858,10 +861,13 @@ iflib_fl_setup(iflib_fl_t fl)
 	/* Now replenish the mbufs */
 	device_printf(sctx->isc_dev, "populating with %d mbufs\n", fl->ifl_size);
 	_iflib_fl_refill(ctx, fl, fl->ifl_size);
-
+	device_printf(sctx->isc_dev, "complete refill completed\n");
+	pause("debug", 10);
 	/*
 	 * handle failure
 	 */
+	MPASS(rxq != NULL);
+	MPASS(rxq->ifr_ifdi != NULL);
 	bus_dmamap_sync(rxq->ifr_ifdi->idi_tag, rxq->ifr_ifdi->idi_map,
 	    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
 	return (err);
