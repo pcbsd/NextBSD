@@ -2108,6 +2108,27 @@ iflib_hwaddr_set(if_shared_ctx_t sctx, uint8_t addr[ETH_ADDR_LEN])
 	ether_ifattach(ifp, addr);
 }
 
+
+static void
+_iflib_assert(if_shared_ctx_t sctx)
+{
+	MPASS(sctx->isc_tx_maxsize);
+	MPASS(sctx->isc_tx_nsegments);
+	MPASS(sctx->isc_tx_maxsegsize);
+
+	MPASS(sctx->isc_rx_maxsize);
+	MPASS(sctx->isc_rx_nsegments);
+	MPASS(sctx->isc_rx_maxsegsize);
+
+	MPASS(sctx->isc_txd_encap);
+	MPASS(sctx->isc_txd_flush);
+	MPASS(sctx->isc_txd_credits_update);
+	MPASS(sctx->isc_rxd_available);
+	MPASS(sctx->isc_rxd_pkt_get);
+	MPASS(sctx->isc_rxd_refill);
+	MPASS(sctx->isc_rxd_flush);
+}
+
 int
 iflib_register(device_t dev, driver_t *driver)
 {
@@ -2115,12 +2136,14 @@ iflib_register(device_t dev, driver_t *driver)
 	iflib_ctx_t ctx;
 	if_t ifp;
 
+	_iflib_assert(sctx);
 	ctx = malloc(sizeof(struct iflib_ctx), M_DEVBUF, M_ZERO|M_WAITOK);
 	if (ctx == NULL)
 		return (ENOMEM);
 	CTX_LOCK_INIT(ctx, device_get_nameunit(dev));
 	sctx->isc_ctx = ctx;
 	ctx->ifc_sctx = sctx;
+
 	ifp = sctx->isc_ifp = if_gethandle(IFT_ETHER);
 	if (ifp == NULL) {
 		device_printf(dev, "can not allocate ifnet structure\n");
