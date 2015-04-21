@@ -184,6 +184,7 @@ int iflib_irq_alloc(if_shared_ctx_t, if_irq_t, int, driver_filter_t, void *filte
 int iflib_irq_alloc_generic(if_shared_ctx_t ctx, if_irq_t irq, int rid,
 							intr_type_t type, driver_filter_t *filter,
 							void *filter_arg, int qid, char *name);
+void iflib_softirq_alloc_generic(if_shared_ctx_t sctx, int rid, intr_type_t type,  void *arg, int qid, char *name);
 
 void iflib_irq_free(if_shared_ctx_t sctx, if_irq_t irq);
 

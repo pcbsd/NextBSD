@@ -770,8 +770,6 @@ batch_start:
 			break;
 	}
 	MPASS(fl->ifl_rxq != NULL);
-	device_printf(sctx->isc_dev, "calling rxd_refill qid=%d pidx=%d i=%d\n", fl->ifl_rxq->ifr_id, pidx, i);
-	pause("debug", 10);
 	sctx->isc_rxd_refill(sctx, fl->ifl_rxq->ifr_id, fl->ifl_id, pidx,
 						 fl->ifl_phys_addrs, fl->ifl_vm_addrs, i);
 	fl->ifl_credits += i;
@@ -859,10 +857,7 @@ iflib_fl_setup(iflib_fl_t fl)
 	iflib_fl_bufs_free(fl);
 
 	/* Now replenish the mbufs */
-	device_printf(sctx->isc_dev, "populating with %d mbufs\n", fl->ifl_size);
 	_iflib_fl_refill(ctx, fl, fl->ifl_size);
-	device_printf(sctx->isc_dev, "complete refill completed\n");
-	pause("debug", 10);
 	/*
 	 * handle failure
 	 */
@@ -2488,6 +2483,7 @@ iflib_irq_alloc_generic(if_shared_ctx_t sctx, if_irq_t irq, int rid,
 	int tqrid;
 	void *q;
 	int err;
+		info = &ctx->ifc_filter_info;
 
 	switch (type) {
 	case IFLIB_INTR_TX:
@@ -2532,6 +2528,42 @@ iflib_irq_alloc_generic(if_shared_ctx_t sctx, if_irq_t irq, int rid,
 		return (err);
 	taskqgroup_attach(tqg, gtask, q, tqrid, name);
 	return (0);
+}
+
+void
+iflib_softirq_alloc_generic(if_shared_ctx_t sctx, int rid, intr_type_t type,  void *arg, int qid, char *name)
+{
+	iflib_ctx_t ctx = sctx->isc_ctx;
+	struct grouptask *gtask;
+	struct taskqgroup *tqg;
+	task_fn_t *fn;
+	void *q;
+
+	switch (type) {
+	case IFLIB_INTR_TX:
+		q = &ctx->ifc_txqs[qid];
+		gtask = &ctx->ifc_txqs[qid].ift_task;
+		tqg = gctx->igc_io_tqg;
+		fn = _task_fn_tx;
+		break;
+	case IFLIB_INTR_RX:
+		q = &ctx->ifc_rxqs[qid];
+		gtask = &ctx->ifc_rxqs[qid].ifr_task;
+		tqg = gctx->igc_io_tqg;
+		fn = _task_fn_rx;
+		break;
+	case IFLIB_INTR_ADMIN:
+		q = ctx;
+		gtask = &ctx->ifc_admin_task;
+		tqg = gctx->igc_config_tqg;
+		rid = -1;
+		fn = _task_fn_admin;
+		break;
+	default:
+		panic("unknown net intr type");
+	}
+	GROUPTASK_INIT(gtask, 0, fn, q);
+	taskqgroup_attach(tqg, gtask, q, rid, name);
 }
 
 void
