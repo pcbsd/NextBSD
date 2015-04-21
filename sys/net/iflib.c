@@ -468,6 +468,7 @@ iflib_txsd_alloc(iflib_txq_t txq)
 	iflib_sd_t txsd;
 	int err, i;
 
+	MPASS(sctx->isc_ntxd > 0);
 	/*
 	 * Setup DMA descriptor areas.
 	 */
@@ -641,6 +642,8 @@ iflib_rxsd_alloc(iflib_rxq_t rxq)
 	iflib_fl_t fl;
 	iflib_sd_t	rxsd;
 	int			err;
+
+	MPASS(sctx->isc_nrxd > 0);
 
 	fl = rxq->ifr_fl;
 	for (int i = 0; i <  rxq->ifr_nfl; i++, fl++) {
@@ -2402,6 +2405,7 @@ iflib_qset_structures_setup(if_shared_ctx_t sctx)
 		return (err);
 
 	if ((err = iflib_rx_structures_setup(sctx)) != 0) {
+		device_printf(sctx->isc_dev, "iflib_rx_structures_setup failed: %d\n", err);
 		iflib_tx_structures_free(sctx);
 		iflib_rx_structures_free(sctx);
 	}

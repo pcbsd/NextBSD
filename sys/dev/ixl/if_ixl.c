@@ -2255,6 +2255,9 @@ ixl_setup_stations(struct ixl_pf *pf)
 	vsi->id = 0;
 	vsi->num_vlans = 0;
 
+	sctx->isc_ntxd = ixl_ringsz;
+	sctx->isc_nrxd = ixl_ringsz;
+
 	tsize = roundup2((ixl_ringsz * sizeof(struct i40e_tx_desc)) +
 					 sizeof(u32), DBA_ALIGN);
 	rsize = roundup2(ixl_ringsz *
@@ -2283,9 +2286,9 @@ ixl_setup_stations(struct ixl_pf *pf)
 		rxr->tail = I40E_QRX_TAIL(que->me);
 
 	}
-
-	return (0);
-
+	error = iflib_qset_structures_setup(sctx);
+	if (error)
+		device_printf(dev, "qset structure setup failed %d\n", error);
 early:
 	return (error);
 }
