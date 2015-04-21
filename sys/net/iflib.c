@@ -2503,7 +2503,7 @@ iflib_irq_alloc_generic(if_shared_ctx_t sctx, if_irq_t irq, int rid,
 		fn = _task_fn_rx;
 		break;
 	case IFLIB_INTR_ADMIN:
-		q = ctx;
+		q = sctx;
 		info = &ctx->ifc_filter_info;
 		gtask = &ctx->ifc_admin_task;
 		tqg = gctx->igc_config_tqg;
@@ -2553,7 +2553,7 @@ iflib_softirq_alloc_generic(if_shared_ctx_t sctx, int rid, intr_type_t type,  vo
 		fn = _task_fn_rx;
 		break;
 	case IFLIB_INTR_ADMIN:
-		q = ctx;
+		q = sctx;
 		gtask = &ctx->ifc_admin_task;
 		tqg = gctx->igc_config_tqg;
 		rid = -1;
@@ -2601,8 +2601,8 @@ iflib_legacy_setup(if_shared_ctx_t sctx, driver_filter_t filter, void *filterarg
 	taskqgroup_attach(gctx->igc_io_tqg, &txq->ift_task, txq, irq->ii_rid, "tx");
 	GROUPTASK_INIT(&rxq->ifr_task, 0, _task_fn_rx, rxq);
 	taskqgroup_attach(gctx->igc_io_tqg, &rxq->ifr_task, rxq, irq->ii_rid, "rx");
-	GROUPTASK_INIT(&ctx->ifc_admin_task, 0, _task_fn_admin, ctx);
-	taskqgroup_attach(gctx->igc_config_tqg, &ctx->ifc_admin_task, ctx, -1, "admin/link");
+	GROUPTASK_INIT(&ctx->ifc_admin_task, 0, _task_fn_admin, sctx);
+	taskqgroup_attach(gctx->igc_config_tqg, &ctx->ifc_admin_task, sctx, -1, "admin/link");
 
 	return (0);
 }
