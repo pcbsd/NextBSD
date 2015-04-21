@@ -850,6 +850,7 @@ iflib_fl_setup(iflib_fl_t fl)
 	iflib_fl_bufs_free(fl);
 
 	/* Now replenish the mbufs */
+	device_printf(sctx->isc_dev, "populating with %d mbufs\n", fl->ifl_size);
 	_iflib_fl_refill(ctx, fl, fl->ifl_size);
 
 	/*
@@ -1046,6 +1047,8 @@ iflib_rxd_pkt_get(iflib_fl_t fl, if_rxd_info_t ri)
 	caddr_t cl;
 	struct mbuf *m;
 	int cidx_next, len = ri->iri_len;
+
+	MPASS(sd->ifsd_cl != NULL);
 
 	if (iflib_recycle_enable && ri->iri_len <= IFLIB_RX_COPY_THRESH) {
 		panic(" not all cases handled");
