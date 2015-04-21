@@ -1578,7 +1578,7 @@ ixl_assign_vsi_msix(struct ixl_pf *pf)
 		char buf[16];
 		rid = vector + 1;
 
-		snprintf(buf, sizeof(buf), "q%d", i);
+		snprintf(buf, sizeof(buf), "rxq%d", i);
 		err = iflib_irq_alloc_generic(sctx, &que->que_irq, rid, IFLIB_INTR_RX,
 									  ixl_msix_que, que, que->me, buf);
 		if (err) {
@@ -1586,6 +1586,8 @@ ixl_assign_vsi_msix(struct ixl_pf *pf)
 			vsi->num_queues = i + 1;
 			goto fail;
 		}
+		snprintf(buf, sizeof(buf), "txq%d", i);
+		iflib_softirq_alloc_generic(sctx, rid, IFLIB_INTR_TX, que, que->me, buf);
 		que->msix = vector;
 	}
 	return (0);
