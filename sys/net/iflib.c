@@ -236,8 +236,7 @@ struct iflib_fl {
 };
 
 /* XXX check this */
-#define TXQ_AVAIL(txq) ((txq)->ift_size - (txq)->ift_pidx + (txq)->ift_cidx)
-
+#define TXQ_AVAIL(txq) (txq)->ift_pidx > (txq)->ift_cidx ? ((txq)->ift_size - ((txq)->ift_pidx - (txq)->ift_cidx)) : ((txq)->ift_cidx - (txq)->ift_pidx)
 typedef struct iflib_global_context {
 	struct taskqgroup	*igc_io_tqg;		/* per-cpu taskqueues for io */
 	struct taskqgroup	*igc_config_tqg;	/* taskqueue for config operations */
