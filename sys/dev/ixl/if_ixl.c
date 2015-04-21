@@ -1449,7 +1449,7 @@ ixl_if_timer(if_shared_ctx_t sctx, uint16_t qid)
 		return;
 
 	/* Fire off the adminq task */
-	taskqueue_enqueue(pf->tq, &pf->adminq);
+	iflib_admin_intr_deferred(sctx);
 
 	/* Update stats */
 	ixl_update_stats_counters(pf);
@@ -3576,7 +3576,7 @@ ixl_if_update_admin_status(if_shared_ctx_t sctx)
 	 * Otherwise, re-enable our interrupt and go to sleep.
 	 */
 	if (result > 0)
-		taskqueue_enqueue(pf->tq, &pf->adminq);
+		iflib_admin_intr_deferred(sctx);
 	else
 		ixl_enable_intr(vsi);
 

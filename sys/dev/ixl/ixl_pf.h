@@ -85,8 +85,6 @@ struct ixl_pf {
 
 	u32			qbase;
 	u32 			admvec;
-	struct task     	adminq;
-	struct taskqueue	*tq;
 
 	bool			link_up;
 	u32			link_speed;
