@@ -604,6 +604,7 @@ ixl_attach(device_t dev)
 	sctx->isc_rx_maxsize = PAGE_SIZE*4;
 	sctx->isc_rx_nsegments = 1;
 	sctx->isc_rx_maxsegsize = PAGE_SIZE*4;
+	ixl_txrx_init(sctx);
 
 	/* Setup OS specific network interface */
 	if ((error = iflib_register(dev, &ixl_if_driver)) != 0) {
@@ -1899,7 +1900,6 @@ ixl_setup_interface(device_t dev, struct ixl_vsi *vsi)
 
 	INIT_DEBUGOUT("ixl_setup_interface: begin");
 	/* initialize fast path functions */
-	ixl_txrx_init(sctx);
 
 	cap = IFCAP_HWCSUM | IFCAP_HWCSUM_IPV6 | IFCAP_LRO | IFCAP_JUMBO_MTU; /* IFCAP_TSO | */
 	cap |= IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWTSO | IFCAP_VLAN_MTU | IFCAP_VLAN_HWCSUM;
