@@ -705,7 +705,7 @@ _iflib_fl_refill(iflib_ctx_t ctx, iflib_fl_t fl, int n)
 	int pidx = fl->ifl_pidx;
 	iflib_sd_t rxsd = &fl->ifl_sds[pidx];
 	caddr_t cl;
-	int i, err;
+	int i;
 	uint64_t phys_addr;
 	if_shared_ctx_t sctx = ctx->ifc_sctx;
 
@@ -722,7 +722,10 @@ batch_start:
 			uma_zfree(fl->ifl_zone, cl);
 			break;
 		}
+#ifdef notyet
 		if ((rxsd->ifsd_flags & RX_SW_DESC_MAP_CREATED) == 0) {
+			int err;
+
 			if ((err = bus_dmamap_create(fl->ifl_ifdi->idi_tag, 0, &rxsd->ifsd_map))) {
 				log(LOG_WARNING, "bus_dmamap_create failed %d\n", err);
 				uma_zfree(fl->ifl_zone, cl);
@@ -730,6 +733,7 @@ batch_start:
 			}
 			rxsd->ifsd_flags |= RX_SW_DESC_MAP_CREATED;
 		}
+#endif
 #if !defined(__i386__) && !defined(__amd64__)
 		{
 			struct refill_rxq_cb_arg cb_arg;
@@ -771,7 +775,9 @@ batch_start:
 	fl->ifl_pidx = pidx;
 	if (n)
 		goto batch_start;
+#ifdef notyet
 done:
+#endif
 	sctx->isc_rxd_flush(sctx, fl->ifl_rxq->ifr_id, fl->ifl_id, fl->ifl_pidx);
 }
 
