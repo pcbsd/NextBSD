@@ -2350,7 +2350,7 @@ iflib_rx_structures_setup(if_shared_ctx_t sctx)
 	iflib_fl_t fl;
 	int i,  q, err;
 
-	for (q = 0; q < sctx->isc_nrxq; q++, rxq++) {
+	for (q = 0; q < sctx->isc_nqsets; q++, rxq++) {
 		tcp_lro_free(&rxq->ifr_lc);
 		for (i = 0, fl = rxq->ifr_fl; i < rxq->ifr_nfl; i++, fl++)
 			if (iflib_fl_setup(fl)) {
@@ -2394,7 +2394,7 @@ iflib_rx_structures_free(if_shared_ctx_t sctx)
 	iflib_ctx_t ctx = sctx->isc_ctx;
 	iflib_rxq_t rxq = ctx->ifc_rxqs;
 
-	for (int i = 0; i < sctx->isc_nrxq; i++, rxq++) {
+	for (int i = 0; i < sctx->isc_nqsets; i++, rxq++) {
 		iflib_rx_sds_free(rxq);
 	}
 }

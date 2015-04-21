@@ -130,7 +130,6 @@ struct if_shared_ctx {
 	iflib_intr_type_t isc_intr;
 	int isc_vectors;
 	int isc_nqsets;
-	int isc_nrxq;
 	int isc_ntxd;
 	int isc_nrxd;
 	int isc_nfl;
