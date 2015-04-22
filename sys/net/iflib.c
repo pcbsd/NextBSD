@@ -297,6 +297,19 @@ MODULE_VERSION(iflib, 1);
 TASKQGROUP_DEFINE(if_io_tqg, mp_ncpus, 1);
 TASKQGROUP_DEFINE(if_config_tqg, 1, 1);
 
+
+static SYSCTL_NODE(_net, OID_AUTO, iflib, CTLFLAG_RD, 0,
+                   "iflib driver parameters");
+static int iflib_tx_frees;
+static int iflib_rx_allocs;
+
+SYSCTL_INT(_net_iflib, OID_AUTO, tx_frees, CTLFLAG_RD,
+    &iflib_tx_frees, 0, "# tx frees");
+SYSCTL_INT(_net_iflib, OID_AUTO, rx_allocs, CTLFLAG_RD,
+    &iflib_rx_allocs, 0, "# rx allocations");
+
+
+
 static void iflib_tx_structures_free(if_shared_ctx_t sctx);
 static void iflib_rx_structures_free(if_shared_ctx_t sctx);
 
@@ -566,6 +579,7 @@ iflib_txsd_free(iflib_ctx_t ctx, iflib_txq_t txq, iflib_sd_t txsd)
 	bus_dmamap_unload(txq->ift_desc_tag,
 					  txsd->ifsd_map);
 	m_freem(txsd->ifsd_m);
+	atomic_add_int(&iflib_tx_frees, 1);
 	txsd->ifsd_m = NULL;
 }
 
@@ -721,6 +735,7 @@ batch_start:
 			uma_zfree(fl->ifl_zone, cl);
 			break;
 		}
+		atomic_add_int(&iflib_rx_allocs, 1);
 #ifdef notyet
 		if ((rxsd->ifsd_flags & RX_SW_DESC_MAP_CREATED) == 0) {
 			int err;
@@ -1325,6 +1340,7 @@ retry:
 				if (m == NULL) {
 					txq->ift_mbuf_defrag_failed++;
 					m_freem(*m_headp);
+					atomic_add_int(&iflib_tx_frees, 1);
 					*m_headp = NULL;
 					err = ENOBUFS;
 				} else {
@@ -1339,6 +1355,7 @@ retry:
 		default:
 			txq->ift_no_tx_dma_setup++;
 			m_freem(*m_headp);
+			atomic_add_int(&iflib_tx_frees, 1);
 			*m_headp = NULL;
 			break;
 		}
@@ -1420,6 +1437,7 @@ iflib_tx_desc_free(iflib_txq_t txq, int n)
 				m = txsd->ifsd_m;
 				txsd->ifsd_m = m->m_nextpkt;
 				m_freem(m);
+				atomic_add_int(&iflib_tx_frees, 1);
 			}
 		}
 
