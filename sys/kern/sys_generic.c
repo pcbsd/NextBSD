@@ -219,6 +219,7 @@ sys_pread(td, uap)
 	return(error);
 }
 
+#if defined(COMPAT_FREEBSD6)
 int
 freebsd6_pread(td, uap)
 	struct thread *td;
@@ -232,6 +233,7 @@ freebsd6_pread(td, uap)
 	oargs.offset = uap->offset;
 	return (sys_pread(td, &oargs));
 }
+#endif
 
 /*
  * Scatter read system call.
@@ -430,6 +432,7 @@ sys_pwrite(td, uap)
 	return(error);
 }
 
+#if defined(COMPAT_FREEBSD6)
 int
 freebsd6_pwrite(td, uap)
 	struct thread *td;
@@ -443,6 +446,7 @@ freebsd6_pwrite(td, uap)
 	oargs.offset = uap->offset;
 	return (sys_pwrite(td, &oargs));
 }
+#endif
 
 /*
  * Gather write system call.
@@ -1214,7 +1218,7 @@ getselfd_cap(struct filedesc *fdp, int fd, struct file **fpp)
 
 	cap_rights_init(&rights, CAP_EVENT);
 
-	return (fget_unlocked(fdp, fd, &rights, 0, fpp, NULL));
+	return (fget_unlocked(fdp, fd, &rights, fpp, NULL));
 }
 
 /*
