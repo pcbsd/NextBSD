@@ -207,6 +207,39 @@ user_add_expiration_body() {
 	atf_check -s exit:0 ${PW} userdel foo
 }
 
+atf_test_case user_add_invalid_user_entry
+user_add_invalid_user_entry_body() {
+	touch ${HOME}/master.passwd
+	touch ${HOME}/group
+
+	pwd_mkdb -p -d ${HOME} ${HOME}/master.passwd || \
+		atf_fail "generate passwd from master.passwd"
+	atf_check -s exit:0 ${PW} useradd foo
+	echo "foo1:*:1002" >> ${HOME}/master.passwd
+	atf_check -s exit:1 -e match:"Invalid user entry" ${PW} useradd foo2
+}
+
+atf_test_case user_add_invalid_group_entry
+user_add_invalid_group_entry_body() {
+	touch ${HOME}/master.passwd
+	touch ${HOME}/group
+
+	pwd_mkdb -p -d ${HOME} ${HOME}/master.passwd || \
+		atf_fail "generate passwd from master.passwd"
+	atf_check -s exit:0 ${PW} useradd foo
+	echo 'foo1:*:1002' >> group
+	atf_check -s exit:1 -e match:"Invalid group entry" ${PW} useradd foo2
+}
+
+atf_test_case user_add_password_from_h
+user_add_password_from_h_body() {
+	populate_etc_skel
+
+	atf_check -s exit:0 ${PW} useradd test -h 0 <<-EOF
+	$(echo test)
+	EOF
+}
+
 atf_init_test_cases() {
 	atf_add_test_case user_add
 	atf_add_test_case user_add_noupdate
@@ -225,4 +258,7 @@ atf_init_test_cases() {
 	atf_add_test_case user_add_password_expiration_date_relative
 	atf_add_test_case user_add_name_too_long
 	atf_add_test_case user_add_expiration
+	atf_add_test_case user_add_invalid_user_entry
+	atf_add_test_case user_add_invalid_group_entry
+	atf_add_test_case user_add_password_from_h
 }

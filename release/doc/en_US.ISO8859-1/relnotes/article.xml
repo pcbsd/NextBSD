@@ -342,6 +342,10 @@
 	receiving the <literal>SIGINFO</literal> signal has been
 	fixed.</para>
 
+      <para revision="283961">The &man.pw.8; utility has been updated
+	with a new flag, <literal>-R</literal>, that sets the root
+	directory within which the utility will operate.</para>
+
       <para revision="284297" contrib="sponsor"
 	sponsor="&clusterhq;">The &man.lockstat.1; utility has been
 	updated with several improvements:</para>
@@ -464,9 +468,6 @@
       <para revision="284254"><application>bmake</application> has
 	been updated to version 20150606.</para>
 
-      <para revision="284329"><application>OpenSSL</application> has
-	been updated to version 1.0.1o.</para>
-
       <para revision="283092">The &man.acpi.4; subsystem has been
 	updated to version 20150515.</para>
 
@@ -488,6 +489,9 @@
 	old behavior, set the m4 option
 	<literal>confUSE_COMPRESSED_IPV6_ADDRESSES</literal> or the cf
 	option <literal>UseCompressedIPv6Addresses</literal>.</para>
+
+      <para revision="285329"><application>OpenSSL</application> has
+	been updated to version 1.0.1p.</para>
     </sect2>
 
     <sect2 xml:id="userland-installer">
