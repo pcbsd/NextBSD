@@ -27,20 +27,34 @@
 __FBSDID("$FreeBSD$");
 
 #include <sys/param.h>
+#include <sys/capsicum.h>
+#include <sys/filedesc.h>
+#include <sys/imgact.h>
 #include <sys/lock.h>
+#include <sys/module.h>
 #include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/signalvar.h>
+#include <sys/syscallsubr.h>
+#include <sys/unistd.h>
 
 #include <compat/cloudabi/cloudabi_proto.h>
+#include <compat/cloudabi/cloudabi_syscalldefs.h>
 
 int
 cloudabi_sys_proc_exec(struct thread *td,
     struct cloudabi_sys_proc_exec_args *uap)
 {
+	struct image_args args;
+	int error;
 
-	/* Not implemented. */
-	return (ENOSYS);
+	error = exec_copyin_data_fds(td, &args, uap->data, uap->datalen,
+	    uap->fds, uap->fdslen);
+	if (error == 0) {
+		args.fd = uap->fd;
+		error = kern_execve(td, &args, NULL);
+	}
+	return (error);
 }
 
 int
@@ -48,7 +62,7 @@ cloudabi_sys_proc_exit(struct thread *td,
     struct cloudabi_sys_proc_exit_args *uap)
 {
 
-	exit1(td, W_EXITCODE(uap->rval, 0));
+	exit1(td, uap->rval, 0);
 	/* NOTREACHED */
 }
 
@@ -56,9 +70,17 @@ int
 cloudabi_sys_proc_fork(struct thread *td,
     struct cloudabi_sys_proc_fork_args *uap)
 {
+	struct filecaps fcaps = {};
+	struct proc *p2;
+	int error, fd;
 
-	/* Not implemented. */
-	return (ENOSYS);
+	cap_rights_init(&fcaps.fc_rights, CAP_FSTAT, CAP_EVENT);
+	error = fork1(td, RFFDG | RFPROC | RFPROCDESC, 0, &p2, &fd, 0, &fcaps);
+	if (error != 0)
+		return (error);
+	/* Return the file descriptor to the parent process. */
+	td->td_retval[0] = fd;
+	return (0);
 }
 
 int
@@ -112,3 +134,5 @@ cloudabi_sys_proc_raise(struct thread *td,
 	PROC_UNLOCK(p);
 	return (0);
 }
+
+MODULE_VERSION(cloudabi, 1);

@@ -43,6 +43,7 @@
 
 #include <machine/atomic.h>
 #include <machine/frame.h>
+#include <machine/armreg.h>
 
 #define	TRAPF_PC(tfp)		((tfp)->tf_lr)
 #define	TRAPF_USERMODE(tfp)	(((tfp)->tf_elr & (1ul << 63)) == 0)
@@ -77,6 +78,9 @@
 #define	CPU_PART_CORTEX_A53	0xD03
 #define	CPU_PART_CORTEX_A57	0xD07
 
+#define	CPU_REV_THUNDER_1_0	0x00
+#define	CPU_REV_THUNDER_1_1	0x01
+
 #define	CPU_IMPL(midr)	(((midr) >> 24) & 0xff)
 #define	CPU_PART(midr)	(((midr) >> 4) & 0xfff)
 #define	CPU_VAR(midr)	(((midr) >> 20) & 0xf)
@@ -92,10 +96,40 @@
 #define	CPU_VAR_MASK	(0xf << 20)
 #define	CPU_REV_MASK	(0xf << 0)
 
-#define CPU_MATCH(mask, impl, part, var, rev)						\
-    (((mask) & PCPU_GET(midr)) == (CPU_IMPL_TO_MIDR((impl)) |		\
-    CPU_PART_TO_MIDR((part)) | CPU_VAR_TO_MIDR((var)) |				\
-    CPU_REV_TO_MIDR((rev))))
+#define	CPU_ID_RAW(impl, part, var, rev)		\
+    (CPU_IMPL_TO_MIDR((impl)) |				\
+    CPU_PART_TO_MIDR((part)) | CPU_VAR_TO_MIDR((var)) |	\
+    CPU_REV_TO_MIDR((rev)))
+
+#define	CPU_MATCH(mask, impl, part, var, rev)		\
+    (((mask) & PCPU_GET(midr)) ==			\
+    ((mask) & CPU_ID_RAW((impl), (part), (var), (rev))))
+
+#define	CPU_MATCH_RAW(mask, devid)			\
+    (((mask) & PCPU_GET(midr)) == ((mask) & (devid)))
+
+/*
+ * Chip-specific errata. This defines are intended to be
+ * booleans used within if statements. When an appropriate
+ * kernel option is disabled, these defines must be defined
+ * as 0 to allow the compiler to remove a dead code thus
+ * produce better optimized kernel image.
+ */
+/*
+ * Vendor:	Cavium
+ * Chip:	ThunderX
+ * Revision(s):	Pass 1.0, Pass 1.1
+ */
+#ifdef THUNDERX_PASS_1_1_ERRATA
+#define	CPU_MATCH_ERRATA_CAVIUM_THUNDER_1_1				\
+    (CPU_MATCH(CPU_IMPL_MASK | CPU_PART_MASK | CPU_REV_MASK,		\
+    CPU_IMPL_CAVIUM, CPU_PART_THUNDER, 0, CPU_REV_THUNDER_1_0) ||	\
+    CPU_MATCH(CPU_IMPL_MASK | CPU_PART_MASK | CPU_REV_MASK,		\
+    CPU_IMPL_CAVIUM, CPU_PART_THUNDER, 0, CPU_REV_THUNDER_1_1))
+#else
+#define	CPU_MATCH_ERRATA_CAVIUM_THUNDER_1_1	0
+#endif
+
 
 extern char btext[];
 extern char etext[];
@@ -113,9 +147,11 @@ void	swi_vm(void *v);
 static __inline uint64_t
 get_cyclecount(void)
 {
+	uint64_t ret;
 
-	/* TODO: This is bogus */
-	return (1);
+	ret = READ_SPECIALREG(cntvct_el0);
+
+	return (ret);
 }
 
 #define	ADDRESS_TRANSLATE_FUNC(stage)				\

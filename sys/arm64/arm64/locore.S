@@ -27,6 +27,7 @@
  */
 
 #include "assym.s"
+#include "opt_kstack_pages.h"
 #include <sys/syscall.h>
 #include <machine/asm.h>
 #include <machine/armreg.h>
@@ -50,8 +51,6 @@
  *  I-Cache: on or off
  *  We are loaded at a 2MiB aligned address
  */
-
-#define	INIT_STACK_SIZE	(PAGE_SIZE * 4)
 
 	.text
 	.globl _start
@@ -180,8 +179,7 @@ ENTRY(mpentry)
 mp_virtdone:
 	ldr	x4, =secondary_stacks
 	mov	x5, #(PAGE_SIZE * KSTACK_PAGES)
-	sub	x1, x0, #1
-	mul	x5, x1, x5
+	mul	x5, x0, x5
 	add	sp, x4, x5
 
 	b	init_secondary
@@ -221,6 +219,14 @@ drop_to_el1:
 
 	/* Don't trap to EL2 for CP15 traps */
 	msr	hstr_el2, xzr
+
+	/* Enable access to the physical timers at EL1 */
+	mrs	x2, cnthctl_el2
+	orr	x2, x2, #(CNTHCTL_EL1PCTEN | CNTHCTL_EL1PCEN)
+	msr	cnthctl_el2, x2
+
+	/* Set the counter offset to a known value */
+	msr	cntvoff_el2, xzr
 
 	/* Hypervisor trap functions */
 	adr	x2, hyp_vectors
@@ -535,7 +541,8 @@ mair:
 		/* Device            Normal, no cache     Normal, write-back */
 	.quad	MAIR_ATTR(0x00, 0) | MAIR_ATTR(0x44, 1) | MAIR_ATTR(0xff, 2)
 tcr:
-	.quad (TCR_TxSZ(64 - VIRT_BITS) | TCR_ASID_16 | TCR_TG1_4K)
+	.quad (TCR_TxSZ(64 - VIRT_BITS) | TCR_ASID_16 | TCR_TG1_4K | \
+	    TCR_CACHE_ATTRS | TCR_SMP_ATTRS)
 sctlr_set:
 	/* Bits to set */
 	.quad (SCTLR_UCI | SCTLR_nTWE | SCTLR_nTWI | SCTLR_UCT | SCTLR_DZE | \

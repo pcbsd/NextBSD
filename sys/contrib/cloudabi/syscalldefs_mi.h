@@ -40,6 +40,19 @@
 #define CLOUDABI_ADVICE_SEQUENTIAL 5
 #define CLOUDABI_ADVICE_WILLNEED 6
 
+// Auxiliary vector entries. All entries that are also part of the
+// x86-64 ABI use the same number. All extensions start at 256.
+#define CLOUDABI_AT_ARGDATA 256
+#define CLOUDABI_AT_ARGDATALEN 257
+#define CLOUDABI_AT_CANARY 258
+#define CLOUDABI_AT_CANARYLEN 259
+#define CLOUDABI_AT_NCPUS 260
+#define CLOUDABI_AT_NULL 0
+#define CLOUDABI_AT_PAGESZ 6
+#define CLOUDABI_AT_PHDR 3
+#define CLOUDABI_AT_PHNUM 4
+#define CLOUDABI_AT_TID 261
+
 // Clocks.
 #define CLOUDABI_CLOCK_MONOTONIC 1
 #define CLOUDABI_CLOCK_PROCESS_CPUTIME_ID 2
@@ -191,9 +204,6 @@
 #define CLOUDABI_O_EXCL 0x4
 #define CLOUDABI_O_TRUNC 0x8
 
-// File descriptor passed to poll() to poll just once.
-#define CLOUDABI_POLL_ONCE 0xffffffff
-
 // File descriptor returned to pdfork()'s child process.
 #define CLOUDABI_PROCESS_CHILD 0xffffffff
 
@@ -202,6 +212,9 @@
 #define CLOUDABI_MAP_FIXED 0x2
 #define CLOUDABI_MAP_PRIVATE 0x4
 #define CLOUDABI_MAP_SHARED 0x8
+
+// File descriptor that must be passed in when using CLOUDABI_MAP_ANON.
+#define CLOUDABI_MAP_ANON_FD 0xffffffff
 
 // msync() flags.
 #define CLOUDABI_MS_ASYNC 0x1
@@ -309,6 +322,12 @@
 #define CLOUDABI_SUBSCRIPTION_DISABLE 0x8
 #define CLOUDABI_SUBSCRIPTION_ENABLE 0x10
 #define CLOUDABI_SUBSCRIPTION_ONESHOT 0x20
+
+// cloudabi_subscription_t::clock.flags.
+#define CLOUDABI_SUBSCRIPTION_CLOCK_ABSTIME 0x1
+
+// cloudabi_subscription_t::fd_readwrite.flags.
+#define CLOUDABI_SUBSCRIPTION_FD_READWRITE_POLL 0x1
 
 // unlinkat().
 #define CLOUDABI_UNLINK_REMOVEDIR 0x1

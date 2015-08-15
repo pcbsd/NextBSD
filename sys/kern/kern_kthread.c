@@ -89,7 +89,7 @@ kproc_create(void (*func)(void *), void *arg,
 		panic("kproc_create called too soon");
 
 	error = fork1(&thread0, RFMEM | RFFDG | RFPROC | RFSTOPPED | flags,
-	    pages, &p2, NULL, 0);
+	    pages, &p2, NULL, 0, NULL);
 	if (error)
 		return error;
 
@@ -162,7 +162,7 @@ kproc_exit(int ecode)
 	wakeup(p);
 
 	/* Buh-bye! */
-	exit1(td, W_EXITCODE(ecode, 0));
+	exit1(td, ecode, 0);
 }
 
 /*
