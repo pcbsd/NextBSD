@@ -11,7 +11,7 @@ SUBDIR+=sendmail
 .endif
 
 BIN1=	asl.conf \
-	boostrap \
+	bootstrap \
 	crontab \
 	devd.conf \
 	devfs.conf \
