@@ -45,10 +45,6 @@ SUBDIR= cat \
 SUBDIR+=	rcp
 .endif
 
-.if ${MK_SENDMAIL} != "no"
-SUBDIR+=	rmail
-.endif
-
 .if ${MK_TCSH} != "no"
 SUBDIR+=	csh
 .endif
