@@ -330,10 +330,6 @@ SUBDIR+=	ruptime
 SUBDIR+=	rwho
 .endif
 
-.if ${MK_SENDMAIL} != "no"
-SUBDIR+=	vacation
-.endif
-
 .if ${MK_TALK} != "no"
 SUBDIR+=	talk
 .endif
