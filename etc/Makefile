@@ -10,6 +10,10 @@ SUBDIR=	\
 SUBDIR+=sendmail
 .endif
 
+install:
+	# hackish workaround transitional installs
+	${INSTALL} -o ${BINOWN} -g ${BINGRP} -m 744 bootstrap /etc
+
 BIN1=	asl.conf \
 	bootstrap \
 	crontab \
