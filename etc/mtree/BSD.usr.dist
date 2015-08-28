@@ -124,8 +124,6 @@
             ru
             ..
         ..
-        sendmail
-        ..
         sm.bin
         ..
     ..
@@ -275,8 +273,6 @@
                 06.nfs
                 ..
                 07.lpd
-                ..
-                08.sendmailop
                 ..
                 11.timedop
                 ..
@@ -1409,8 +1405,6 @@
             ..
         ..
         security
-        ..
-        sendmail
         ..
         skel
         ..
