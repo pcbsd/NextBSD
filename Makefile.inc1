@@ -789,10 +789,6 @@ __installcheck_DESTDIR:
 #
 CHECK_UIDS=	auditdistd
 CHECK_GIDS=	audit
-.if ${MK_SENDMAIL} != "no"
-CHECK_UIDS+=	smmsp
-CHECK_GIDS+=	smmsp
-.endif
 .if ${MK_PF} != "no"
 CHECK_UIDS+=	proxy
 CHECK_GIDS+=	proxy authpf
