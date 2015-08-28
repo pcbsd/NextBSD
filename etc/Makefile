@@ -3,10 +3,13 @@
 
 .include <src.opts.mk>
 
-SUBDIR=	\
-	newsyslog.conf.d
+SUBDIR=	newsyslog.conf.d
+SUBDIR+= launchd.d
+SUBDIR+= bootstrap.d
+SUBDIR+= defaults
 
 BIN1=	asl.conf \
+	bootstrap \
 	crontab \
 	devd.conf \
 	devfs.conf \
