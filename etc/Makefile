@@ -134,10 +134,6 @@ BIN1+= portsnap.conf
 BIN1+= pf.os
 .endif
 
-.if ${MK_SENDMAIL} != "no"
-BIN1+=	rc.sendmail
-.endif
-
 .if ${MK_TCSH} != "no"
 BIN1+= csh.cshrc csh.login csh.logout
 .endif
@@ -152,9 +148,6 @@ BIN2=	bootstrap netstart pccard_ether rc.suspend rc.resume
 MTREE=	BSD.debug.dist BSD.include.dist BSD.root.dist BSD.usr.dist BSD.var.dist
 .if ${MK_TESTS} != "no"
 MTREE+=	BSD.tests.dist
-.endif
-.if ${MK_SENDMAIL} != "no"
-MTREE+=	BSD.sendmail.dist
 .endif
 
 PPPCNF=	ppp.conf
@@ -262,9 +255,6 @@ distribution:
 		${INSTALL_SYMLINK} ../var/unbound ${DESTDIR}/etc/unbound; \
 	fi
 .endif
-.if ${MK_SENDMAIL} != "no"
-	${_+_}cd ${.CURDIR}/sendmail; ${MAKE} distribution
-.endif
 .if ${MK_OPENSSH} != "no"
 	cd ${.CURDIR}; ${INSTALL} -o ${BINOWN} -g ${BINGRP} -m 644 \
 	    ${SSH} ${DESTDIR}/etc/ssh
@@ -350,9 +340,6 @@ MTREES+=	mtree/BSD.groff.dist		/usr
 .endif
 .if ${MK_TESTS} != "no"
 MTREES+=	mtree/BSD.tests.dist		${TESTSBASE}
-.endif
-.if ${MK_SENDMAIL} != "no"
-MTREES+=	mtree/BSD.sendmail.dist		/
 .endif
 .for mtree in ${LOCAL_MTREE}
 MTREES+=	../${mtree}			/

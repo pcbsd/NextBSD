@@ -72,7 +72,6 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	libmach \
 	libmemstat \
 	libmd \
-	${_libmilter} \
 	${_libmp} \
 	libmt \
 	${_libnandfs} \
@@ -96,9 +95,7 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	${_librtld_db} \
 	libsbuf \
 	${_libsdp} \
-	${_libsm} \
 	${_libsmb} \
-	${_libsmdb} \
 	${_libsmutil} \
 	libsqlite3 \
 	libstand \
@@ -300,13 +297,6 @@ _libpmc=	libpmc
 
 .if ${MK_RADIUS_SUPPORT} != "no"
 _libradius=	libradius
-.endif
-
-.if ${MK_SENDMAIL} != "no"
-_libmilter=	libmilter
-_libsm=		libsm
-_libsmdb=	libsmdb
-_libsmutil=	libsmutil
 .endif
 
 .if ${MK_TELNET} != "no"

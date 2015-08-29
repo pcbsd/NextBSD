@@ -300,14 +300,6 @@ SUBDIR+=	rwhod
 SUBDIR+=	etcupdate
 .endif
 
-.if ${MK_SENDMAIL} != "no"
-SUBDIR+=	editmap
-SUBDIR+=	mailstats
-SUBDIR+=	makemap
-SUBDIR+=	praliases
-SUBDIR+=	sendmail
-.endif
-
 .if ${MK_TCP_WRAPPERS} != "no"
 SUBDIR+=	tcpdchk
 SUBDIR+=	tcpdmatch
