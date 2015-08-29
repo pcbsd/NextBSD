@@ -6,14 +6,9 @@
 SUBDIR=	newsyslog.conf.d
 SUBDIR+= launchd.d
 SUBDIR+= bootstrap.d
-SUBDIR+= defaults
-
-.if ${MK_SENDMAIL} != "no"
-SUBDIR+=sendmail
-.endif
+SUBDIR+= defaults.d
 
 BIN1=	asl.conf \
-	bootstrap \
 	crontab \
 	devd.conf \
 	devfs.conf \
