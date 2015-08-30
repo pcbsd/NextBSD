@@ -672,6 +672,8 @@ cmd_bootstrap(int argc, char * const argv[])
 					printf("failed: %s\n", strerror(errno));
 			}
 		}
+		// give jobs time to start
+		sleep(2);
 		// Then run the rc script(s)
 		runcom();
 	}
