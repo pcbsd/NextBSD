@@ -206,29 +206,33 @@ MODULE_DEPEND(ix, ether, 1, 1, 1);
 MODULE_DEPEND(ix, iflib, 1, 1, 1); 
 
 static device_method_t ixgbe_if_methods[] = {
-  DEVMETHOD(ifdi_attach_pre, ixgbe_if_attach_pre),
-  DEVMETHOD(ifdi_attach_post, ixgbe_if_attach_post), 
-  DEVMETHOD(ifdi_detach, ixgbe_if_detach),
-  DEVMETHOD(ifdi_shutdown, ixgbe_if_shutdown),
-  DEVMETHOD(ifdi_suspend, ixgbe_if_suspend),
-  DEVMETHOD(ifdi_resume, ixgbe_if_resume),
-  DEVMETHOD(ifdi_init, ixgbe_if_init),
-  DEVMETHOD(ifdi_stop, ixgbe_if_stop),
-  DEVMETHOD(ifdi_msix_intr_assign, ixgbe_if_msix_intr_assign),
-  DEVMETHOD(ifdi_intr_enable, ixgbe_if_enable_intr), 
-  DEVMETHOD(ifdi_intr_disable, ixgbe_if_disable_intr),
-  DEVMETHOD(ifdi_queue_intr_enable, ixgbe_if_queue_intr_enable),
-  DEVMETHOD(ifdi_queues_alloc, ixgbe_if_queues_alloc),
-  DEVMETHOD(ifdi_queues_free, ixgbe_if_queues_free),
-  DEVMETHOD(ifdi_multi_set, ixgbe_if_multi_set),
-  DEVMETHOD(ifdi_mtu_set, ixgbe_if_mtu_set),
-  DEVMETHOD(ifdi_media_status, ixgbe_if_media_status),
-  DEVMETHOD(ifdi_media_change, ixgbe_if_media_change),
-  DEVMETHOD(ifdi_promisc_set, ixgbe_if_promisc_set),
-  DEVMETHOD(ifdi_timer, ixgbe_if_timer),
-  DEVMETHOD(ifdi_vlan_register, ixgbe_if_vlan_register),
-  DEVMETHOD(ifdi_vlan_unregister, ixgbe_if_vlan_unregister),
-  DEVMETHOD_END
+	DEVMETHOD(ifdi_attach_pre, ixgbe_if_attach_pre),
+	DEVMETHOD(ifdi_attach_post, ixgbe_if_attach_post), 
+	DEVMETHOD(ifdi_detach, ixgbe_if_detach),
+	DEVMETHOD(ifdi_shutdown, ixgbe_if_shutdown),
+	DEVMETHOD(ifdi_suspend, ixgbe_if_suspend),
+	DEVMETHOD(ifdi_resume, ixgbe_if_resume),
+	DEVMETHOD(ifdi_init, ixgbe_if_init),
+	DEVMETHOD(ifdi_stop, ixgbe_if_stop),
+	DEVMETHOD(ifdi_msix_intr_assign, ixgbe_if_msix_intr_assign),
+	DEVMETHOD(ifdi_intr_enable, ixgbe_if_enable_intr), 
+	DEVMETHOD(ifdi_intr_disable, ixgbe_if_disable_intr),
+	DEVMETHOD(ifdi_queue_intr_enable, ixgbe_if_queue_intr_enable),
+	DEVMETHOD(ifdi_queues_alloc, ixgbe_if_queues_alloc),
+	DEVMETHOD(ifdi_queues_free, ixgbe_if_queues_free),
+#if 0
+	/* XXX implement me! */
+	DEVMETHOD(ifdi_update_admin_status, ixgbe_if_update_admin_status),
+#endif  
+	DEVMETHOD(ifdi_multi_set, ixgbe_if_multi_set),
+	DEVMETHOD(ifdi_mtu_set, ixgbe_if_mtu_set),
+	DEVMETHOD(ifdi_media_status, ixgbe_if_media_status),
+	DEVMETHOD(ifdi_media_change, ixgbe_if_media_change),
+	DEVMETHOD(ifdi_promisc_set, ixgbe_if_promisc_set),
+	DEVMETHOD(ifdi_timer, ixgbe_if_timer),
+	DEVMETHOD(ifdi_vlan_register, ixgbe_if_vlan_register),
+	DEVMETHOD(ifdi_vlan_unregister, ixgbe_if_vlan_unregister),
+	DEVMETHOD_END
 };
 
 /*
@@ -1906,17 +1910,12 @@ ixgbe_if_promisc_set(if_ctx_t ctx, int flags)
 	if (ifp->if_flags & IFF_ALLMULTI)
 		mcnt = MAX_NUM_MULTICAST_ADDRESSES;
 	else {
-		struct	ifmultiaddr *ifma;
-		TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
-			if (ifma->ifma_addr->sa_family != AF_LINK)
-				continue;
-			if (mcnt == MAX_NUM_MULTICAST_ADDRESSES)
-				break;
-			mcnt++;
-		}
+		mcnt = if_multiaddr_count(ifp, MAX_NUM_MULTICAST_ADDRESSES);
 	}
 	if (mcnt < MAX_NUM_MULTICAST_ADDRESSES)
 		reg_rctl &= (~IXGBE_FCTRL_MPE);
+
+	/* clear promiscuous mode and multicast filters before enabling */
 	IXGBE_WRITE_REG(&adapter->hw, IXGBE_FCTRL, reg_rctl);
   
 	if (ifp->if_flags & IFF_PROMISC) {
