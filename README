@@ -1,25 +1,15 @@
-This is the darwin-support branch. It adds support for a subset of the mach
-API for the purpose of supporting launchd, asl, and notify(3). The mach interface generator should
-be able to work with modern .defs (MIG) files.
+This is the darwin-support branch. It adds support for a subset of the mach APIs
+to enable FreeBSD to run some of the OSX daemons.
 
 It is currently only supported as a module to workaround the limited typeid space (15 bits) of
 dtrace.
 
 
-The Mach services kernel module (mach.ko) can only be loaded at boot time. Add the following line
-to /boot/loader.conf:
-mach_load="YES"
+If there are problems in mach that prevent the system from booting completely you
+can disable launchd by dropping to the loader prompt (3) and typing:
+set init_path=/sbin/init
 
-launchd can be run as pid1 by adding the following to loader.conf:
-init_path="/sbin/launchd"
-or at the loader prompt:
-set init_path="/sbin/launchd"
-
-
-copy etc/bootstrap, etc/launchd.d/, and asl.conf to /etc
-
-Note that launchctl uses JSON format.
-
+If you disable launchd you will need to start devd by hand
 
 Immediate issues:
 migcom is building during bootstrap but includes target headers - it needs to be
