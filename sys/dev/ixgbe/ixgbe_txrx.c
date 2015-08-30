@@ -21,7 +21,7 @@ static int ixgbe_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri);
 static int ixgbe_tso_setup(struct tx_ring *, struct mbuf *, u32 *, u32 *);
 static int ixgbe_tx_ctx_setup(struct tx_ring *txr, struct mbuf *mp, u32 *cmd_type_len, u32 *olinfo_status, int pidx, int *offload);
 
-static void ixgbe_rx_checksum(u32 staterr, struct mbuf * mp, u32 ptype);
+static void ixgbe_rx_checksum(u32 staterr, if_rxd_info_t ri, u32 ptype);
 
 extern int ixgbe_intr(void *arg);
 
@@ -528,8 +528,8 @@ ixgbe_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
        rxr->rx_packets++;
        rxr->packets++;
 
-       	if ((ifp->if_capenable & IFCAP_RXCSUM) != 0)
-	  ixgbe_rx_checksum(staterr, ri->iri_m,  ptype);
+	   if ((ifp->if_capenable & IFCAP_RXCSUM) != 0)
+		   ixgbe_rx_checksum(staterr, ri,  ptype);
 
 #ifdef RSS
         ri->iri_flowid =
@@ -557,7 +557,7 @@ ixgbe_isc_rxd_pkt_get(void *arg, if_rxd_info_t ri)
  *
  *********************************************************************/
 static void
-ixgbe_rx_checksum(u32 staterr, struct mbuf * mp, u32 ptype)
+ixgbe_rx_checksum(u32 staterr, if_rxd_info_t ri, u32 ptype)
 {
 	u16	status = (u16) staterr;
 	u8	errors = (u8) (staterr >> 24);
@@ -570,11 +570,9 @@ ixgbe_rx_checksum(u32 staterr, struct mbuf * mp, u32 ptype)
 	if (status & IXGBE_RXD_STAT_IPCS) {
 		if (!(errors & IXGBE_RXD_ERR_IPE)) {
 			/* IP Checksum Good */
-			mp->m_pkthdr.csum_flags = CSUM_IP_CHECKED;
-			mp->m_pkthdr.csum_flags |= CSUM_IP_VALID;
-
+			ri->iri_csum_flags = CSUM_IP_CHECKED | CSUM_IP_VALID;
 		} else
-			mp->m_pkthdr.csum_flags = 0;
+			ri->iri_csum_flags = 0;
 	}
 	if (status & IXGBE_RXD_STAT_L4CS) {
 		u64 type = (CSUM_DATA_VALID | CSUM_PSEUDO_HDR);
@@ -583,12 +581,11 @@ ixgbe_rx_checksum(u32 staterr, struct mbuf * mp, u32 ptype)
 			type = CSUM_SCTP_VALID;
 #endif
 		if (!(errors & IXGBE_RXD_ERR_TCPE)) {
-			mp->m_pkthdr.csum_flags |= type;
+			ri->iri_csum_flags |= type;
 			if (!sctp)
-				mp->m_pkthdr.csum_data = htons(0xffff);
+				ri->iri_csum_data = htons(0xffff);
 		} 
 	}
-	return;
 }
 
 /********************************************************************
