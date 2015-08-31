@@ -259,10 +259,6 @@ FILES+=		rwho
 FILES+=		routed
 .endif
 
-.if ${MK_SENDMAIL} != "no"
-FILES+=		sendmail
-.endif
-
 .if ${MK_TIMED} != "no"
 FILES+=		timed
 .endif
