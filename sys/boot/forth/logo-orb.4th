@@ -24,7 +24,7 @@
 \ 
 \ $FreeBSD$
 
-46 logoX ! 4 logoY ! \ Initialize logo placement defaults
+46 logoX ! 7 logoY ! \ Initialize logo placement defaults
 
 : logo+ ( x y c-addr/u -- x y' )
 	2swap 2dup at-xy 2swap \ position the cursor
@@ -33,26 +33,23 @@
 	1+ \ increase y for next time we're called
 ;
 
-: logo ( x y -- ) \ color Orb mascot (19 rows x 33 columns)
+: logo ( x y -- ) \ color Orb mascot (15 rows x 30 columns)
 
-	s"               ___	          " logo+
-	s"            .-'   `'.           " logo+
-	s"           /         \          " logo+
-	s"           |         ;          " logo+
-	s"           |         |          " logo+
-	s"  _.._     |0) ~ (0) |    _.--'`" logo+
-	s"'`_.. '.__.\    '--. \_.-' ,--'`" logo+
-	s"'`   ',__ /./;   ;, '.__.'`    _" logo+
-	s" .---.__.' / |   |\   \__..""  "" logo+
-	s"'.''-._.-'`_./  /\ '.  \ _.~~```" logo+
-	s" |  .' _.-' |  |  \  \  '.      " logo+
-	s"\ \/ .'     \  \   '. '-._)     " logo+
-	s" \/ /        \  \    `=.__`~-.  " logo+
-	s" / /\         `) )    / / `"".`\" logo+
-	s".'\ \        / /    ( (     / / " logo+
-	s"   ) )    .-'.'      '.'.  | (  " logo+
-	s"   (/`    ( (`          ) )  '-;" logo+
-	s"    `      '-;         (-'	  " logo+
-	s"                                " logo+
+	s"  @[31m```                        @[31;1m`@[31m" logo+
+	s" s` `.....---...@[31;1m....--.```   -/@[31m"     logo+
+	s" +o   .--`         @[31;1m/y:`      +.@[31m"     logo+
+	s"  yo`:.            @[31;1m:o      `+-@[31m"      logo+
+	s"   y/               @[31;1m-/`   -o/@[31m"       logo+
+	s"  .-                  @[31;1m::/sy+:.@[31m"      logo+
+	s"  /                     @[31;1m`--  /@[31m"      logo+
+	s" `:                          @[31;1m:`@[31m"     logo+
+	s" `:                          @[31;1m:`@[31m"     logo+
+	s"  /                          @[31;1m/@[31m"      logo+
+	s"  .-                        @[31;1m-.@[31m"      logo+
+	s"   --                      @[31;1m-.@[31m"       logo+
+	s"    `:`                  @[31;1m`:`"             logo+
+	s"      @[31;1m.--             `--."               logo+
+	s"         .---.....----.@[m"                      logo+
+
 	2drop
 ;
