@@ -38,14 +38,12 @@ SRCS=	hostres_begemot.c		\
 	hostres_fs_tbl.c		\
 	hostres_network_tbl.c		\
 	hostres_partition_tbl.c		\
-	hostres_printer_tbl.c		\
 	hostres_processor_tbl.c		\
 	hostres_scalars.c		\
 	hostres_snmp.c			\
 	hostres_storage_tbl.c		\
 	hostres_swinstalled_tbl.c	\
-	hostres_swrun_tbl.c		\
-	printcap.c
+	hostres_swrun_tbl.c
 
 #Not having NDEBUG defined will enable assertions and a lot of output on stderr
 CFLAGS+= -DNDEBUG -I${LPRSRC}
@@ -72,9 +70,6 @@ BMIBS=	BEGEMOT-HOSTRES-MIB.txt
 LIBADD=	kvm devinfo m geom memstat
 
 .include <bsd.snmpmod.mk>
-
-printcap.So: printcap.c
-	${CC} ${PICFLAG} -DPIC ${CFLAGS:C/^-W.*//} -c ${.IMPSRC} -o ${.TARGET}
 
 smilint:
 	env SMIPATH=.:/usr/share/snmp/mibs:/usr/local/share/snmp/mibs \
