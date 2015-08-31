@@ -218,10 +218,6 @@ SUBDIR+=	nscd
 .endif
 .endif
 
-.if ${MK_LPR} != "no"
-SUBDIR+=	lpr
-.endif
-
 .if ${MK_MAN_UTILS} != "no"
 SUBDIR+=	manctl
 .endif

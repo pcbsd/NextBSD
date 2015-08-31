@@ -232,10 +232,6 @@ SUBDIR+=	file
 SUBDIR+=	finger
 .endif
 
-.if ${MK_FTP} != "no"
-SUBDIR+=	ftp
-.endif
-
 .if ${MK_GPL_DTC} != "yes"
 SUBDIR+=	dtc
 .endif
