@@ -24,7 +24,6 @@ SUBDIR=	${_atf} \
 	${_rshd} \
 	${_rtld-elf} \
 	save-entropy \
-	${_telnetd} \
 	${_tests} \
 	${_tftp-proxy} \
 	ulog-helper \
@@ -44,10 +43,6 @@ _casper=	casper
 
 .if ${MK_FINGER} != "no"
 SUBDIR+=	fingerd
-.endif
-
-.if ${MK_FTP} != "no"
-SUBDIR+=	ftpd
 .endif
 
 .if ${MK_MAIL} != "no"
@@ -85,16 +80,8 @@ _rlogind=	rlogind
 _rshd=		rshd
 .endif
 
-.if ${MK_TALK} != "no"
-SUBDIR+=	talkd
-.endif
-
 .if ${MK_TCP_WRAPPERS} != "no"
 SUBDIR+=	tcpd
-.endif
-
-.if ${MK_TELNET} != "no"
-_telnetd=	telnetd
 .endif
 
 .if ${MK_TFTP} != "no"
