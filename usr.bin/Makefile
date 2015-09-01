@@ -326,14 +326,6 @@ SUBDIR+=	ruptime
 SUBDIR+=	rwho
 .endif
 
-.if ${MK_TALK} != "no"
-SUBDIR+=	talk
-.endif
-
-.if ${MK_TELNET} != "no"
-SUBDIR+=	telnet
-.endif
-
 .if ${MACHINE_CPUARCH} == "amd64"
 #_xpc_tests=     xpc-tests
 _mach_tests=	mach-tests
