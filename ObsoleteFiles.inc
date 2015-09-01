@@ -38,11 +38,6 @@
 #   xargs -n1 | sort | uniq -d;
 # done
 
-OLD_FILES+=usr/bin/ftp
-OLD_FILES+=usr/bin/lpr
-OLD_FILES+=usr/sbin/sendmail
-OLD_FILES+=usr/bin/talk
-OLD_FILES+=usr/bin/telnet
 # 20150818: *allocm() are gone in jemalloc 4.0.0
 OLD_FILES+=usr/share/man/man3/allocm.3.gz
 OLD_FILES+=usr/share/man/man3/dallocm.3.gz
