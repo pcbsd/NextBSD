@@ -103,7 +103,6 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	libstdthreads \
 	libSystem \
 	libtacplus \
-	${_libtelnet} \
 	${_libthr} \
 	libthread_db \
 	libucl \
@@ -297,10 +296,6 @@ _libpmc=	libpmc
 
 .if ${MK_RADIUS_SUPPORT} != "no"
 _libradius=	libradius
-.endif
-
-.if ${MK_TELNET} != "no"
-_libtelnet=	libtelnet
 .endif
 
 .if ${MK_TESTS_SUPPORT} != "no"
