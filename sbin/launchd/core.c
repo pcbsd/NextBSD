@@ -11761,7 +11761,7 @@ job_mig_ipc_request(job_t j, vm_offset_t request,
 	int in_fds[LAUNCHD_MAX_LEGACY_FDS];
 	size_t i = 0;
 	for (i = 0; i < nfds; i++) {
-		in_fds[i] = fileport_makefd(request_fds[i]);
+		in_fds[i] = _fd(fileport_makefd(request_fds[i]));
 		if (in_fds[i] == -1) {
 			job_log(j, LOG_ERR, "Bad descriptor passed in legacy IPC request at index: %lu", i);
 		}
