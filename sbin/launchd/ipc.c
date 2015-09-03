@@ -568,7 +568,7 @@ ipc_process_command(launch_data_t data, const char *cmd, void *context)
 					resp = launch_data_new_errno(errno);
 				} else {
 					resp = job_export(ctx->j);
-					ipc_revoke_fds(ctx->resp);
+					ipc_revoke_fds(resp);
 				}
 			}
 		}
