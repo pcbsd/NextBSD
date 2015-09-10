@@ -4,6 +4,15 @@ to enable FreeBSD to run some of the OSX daemons.
 It is currently only supported as a module to workaround the limited typeid space (15 bits) of
 dtrace.
 
+To enable booting launchd, add the following lines /boot/loader.conf:
+##############################################################
+###  Darwin Kernel settings  ########################################
+##############################################################
+
+init_path="/sbin/launchd"
+mach_load="YES"
+
+
 
 If there are problems in mach that prevent the system from booting completely you
 can disable launchd by dropping to the loader prompt (3) and typing:
