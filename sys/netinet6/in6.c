@@ -281,8 +281,6 @@ in6_control(struct socket *so, u_long cmd, caddr_t data,
 		/* FALLTHROUGH */
 	case OSIOCGIFINFO_IN6:
 	case SIOCGIFINFO_IN6:
-	case SIOCGDRLST_IN6:
-	case SIOCGPRLST_IN6:
 	case SIOCGNBRINFO_IN6:
 	case SIOCGDEFIFACE_IN6:
 		return (nd6_ioctl(cmd, data, ifp));
@@ -1198,11 +1196,13 @@ in6_update_ifa_internal(struct ifnet *ifp, struct in6_aliasreq *ifra,
 	 * source address.
 	 */
 	ia->ia6_flags &= ~IN6_IFF_DUPLICATED;	/* safety */
-	if (hostIsNew && in6if_do_dad(ifp))
-		ia->ia6_flags |= IN6_IFF_TENTATIVE;
 
-	/* DAD should be performed after ND6_IFF_IFDISABLED is cleared. */
-	if (ND_IFINFO(ifp)->flags & ND6_IFF_IFDISABLED)
+	/*
+	 * DAD should be performed for an new address or addresses on
+	 * an interface with ND6_IFF_IFDISABLED.
+	 */
+	if (in6if_do_dad(ifp) &&
+	    (hostIsNew || (ND_IFINFO(ifp)->flags & ND6_IFF_IFDISABLED)))
 		ia->ia6_flags |= IN6_IFF_TENTATIVE;
 
 	/* notify other subsystems */
@@ -1518,7 +1518,7 @@ in6ifa_ifwithaddr(const struct in6_addr *addr, uint32_t zoneid)
  * ifaddr is returned referenced.
  */
 struct in6_ifaddr *
-in6ifa_ifpwithaddr(struct ifnet *ifp, struct in6_addr *addr)
+in6ifa_ifpwithaddr(struct ifnet *ifp, const struct in6_addr *addr)
 {
 	struct ifaddr *ifa;
 
@@ -2138,8 +2138,7 @@ in6_lltable_rtcheck(struct ifnet *ifp,
 		 * Create an ND6 cache for an IPv6 neighbor
 		 * that is not covered by our own prefix.
 		 */
-		/* XXX ifaof_ifpforaddr should take a const param */
-		ifa = ifaof_ifpforaddr(__DECONST(struct sockaddr *, l3addr), ifp);
+		ifa = ifaof_ifpforaddr(l3addr, ifp);
 		if (ifa != NULL) {
 			ifa_free(ifa);
 			if (rt != NULL)
@@ -2264,6 +2263,9 @@ in6_lltable_alloc(struct lltable *llt, u_int flags,
 		lle->la_flags |= (LLE_VALID | LLE_STATIC);
 	}
 
+	if ((lle->la_flags & LLE_STATIC) != 0)
+		lle->ln_state = ND6_LLINFO_REACHABLE;
+
 	return (lle);
 }
 
@@ -2311,8 +2313,8 @@ in6_lltable_dump_entry(struct lltable *llt, struct llentry *lle,
 	int error;
 
 	bzero(&ndpc, sizeof(ndpc));
-			/* skip invalid entries */
-			if ((lle->la_flags & (LLE_DELETED|LLE_VALID)) != LLE_VALID)
+			/* skip deleted entries */
+			if ((lle->la_flags & LLE_DELETED) == LLE_DELETED)
 				return (0);
 			/* Skip if jailed and not a valid IP of the prison. */
 			lltable_fill_sa_entry(lle,
