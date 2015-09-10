@@ -13,7 +13,7 @@ SUBDIR+=	fdt
 .if ${MACHINE_CPUARCH} == "aarch64" || \
     ${MACHINE_CPUARCH} == "amd64" || \
 	${MACHINE_CPUARCH} == "arm"
-#SUBDIR+=	loader boot1
+SUBDIR+=	loader boot1
 .endif
 
 .include <bsd.subdir.mk>
