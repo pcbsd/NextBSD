@@ -241,9 +241,14 @@ dvd: packagesystem
 	touch ${.TARGET}
 
 release.iso: disc1.iso
+.if ${TARGET_ARCH} == "amd64"
+disc1.iso: disc1
+	sh ${.CURDIR}/${TARGET}/mkisoimages.sh -b ${VOLUME_LABEL}_CD ${.TARGET} disc1 ${.CURDIR}/xtra
+
+.else
 disc1.iso: disc1
 	sh ${.CURDIR}/${TARGET}/mkisoimages.sh -b ${VOLUME_LABEL}_CD ${.TARGET} disc1
-
+.endif
 dvd1.iso: dvd pkg-stage
 	sh ${.CURDIR}/${TARGET}/mkisoimages.sh -b ${VOLUME_LABEL}_DVD ${.TARGET} dvd
 
