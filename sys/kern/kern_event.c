@@ -1269,10 +1269,16 @@ kqueue_register(struct kqueue *kq, struct kevent64_s *kev, struct thread *td, in
 	if (fops == NULL)
 		return EINVAL;
 
-	if (kev->flags & EV_ADD)
-		tkn = knote_alloc(waitok);	/* prevent waiting with locks */
-	else
+	if (kev->flags & EV_ADD) {
+		/*
+		 * Prevent waiting with locks.  Non-sleepable
+		 * allocation failures are handled in the loop, only
+		 * if the spare knote appears to be actually required.
+		 */
+		tkn = knote_alloc(waitok);
+	} else {
 		tkn = NULL;
+	}
 
 findkn:
 	if (fops->f_isfd) {
@@ -1484,8 +1490,7 @@ done:
 		FILEDESC_XUNLOCK(td->td_proc->p_fd);
 	if (fp != NULL)
 		fdrop(fp, td);
-	if (tkn != NULL)
-		knote_free(tkn);
+	knote_free(tkn);
 	if (fops != NULL)
 		kqueue_fo_release(filt);
 	return (error);
@@ -1681,10 +1686,6 @@ kqueue_scan(struct kqueue *kq, int maxevents, struct kevent_copyops *k_ops,
 	} else
 		asbt = 0;
 	marker = knote_alloc(1);
-	if (marker == NULL) {
-		error = ENOMEM;
-		goto done_nl;
-	}
 	marker->kn_status = KN_MARKER;
 	KQ_LOCK(kq);
 
@@ -2103,7 +2104,7 @@ void
 knote(struct knlist *list, long hint, int lockflags)
 {
 	struct kqueue *kq;
-	struct knote *kn;
+	struct knote *kn, *tkn;
 	int error;
 
 	if (list == NULL)
@@ -2115,14 +2116,13 @@ knote(struct knlist *list, long hint, int lockflags)
 		KNL_LOCK(list);
 
 	/*
-	 * If we unlock the list lock (and set KN_INFLUX), we can eliminate
-	 * the kqueue scheduling, but this will introduce four
-	 * lock/unlock's for each knote to test.  If we do, continue to use
-	 * SLIST_FOREACH, SLIST_FOREACH_SAFE is not safe in our case, it is
-	 * only safe if you want to remove the current item, which we are
-	 * not doing.
+	 * If we unlock the list lock (and set KN_INFLUX), we can
+	 * eliminate the kqueue scheduling, but this will introduce
+	 * four lock/unlock's for each knote to test.  Also, marker
+	 * would be needed to keep iteration position, since filters
+	 * or other threads could remove events.
 	 */
-	SLIST_FOREACH(kn, &list->kl_list, kn_selnext) {
+	SLIST_FOREACH_SAFE(kn, &list->kl_list, kn_selnext, tkn) {
 		kq = kn->kn_kq;
 		KQ_LOCK(kq);
 		if ((kn->kn_status & (KN_INFLUX | KN_SCAN)) == KN_INFLUX) {
@@ -2558,15 +2558,16 @@ SYSINIT(knote, SI_SUB_PSEUDO, SI_ORDER_ANY, knote_init, NULL);
 static struct knote *
 knote_alloc(int waitok)
 {
-	return ((struct knote *)uma_zalloc(knote_zone,
-	    (waitok ? M_WAITOK : M_NOWAIT)|M_ZERO));
+
+	return (uma_zalloc(knote_zone, (waitok ? M_WAITOK : M_NOWAIT) |
+	    M_ZERO));
 }
 
 static void
 knote_free(struct knote *kn)
 {
-	if (kn != NULL)
-		uma_zfree(knote_zone, kn);
+
+	uma_zfree(knote_zone, kn);
 }
 
 /*

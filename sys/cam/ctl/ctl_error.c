@@ -446,16 +446,6 @@ ctl_build_ua(struct ctl_lun *lun, uint32_t initidx,
 		asc = 0x2A;
 		ascq = 0x02;
 		break;
-	case CTL_UA_LVD:
-		/* 29h/06h  TRANSCEIVER MODE CHANGED TO LVD */
-		asc = 0x29;
-		ascq = 0x06;
-		break;
-	case CTL_UA_SE:
-		/* 29h/05h  TRANSCEIVER MODE CHANGED TO SINGLE-ENDED */
-		asc = 0x29;
-		ascq = 0x05;
-		break;
 	case CTL_UA_RES_PREEMPT:
 		/* 2Ah/03h  RESERVATIONS PREEMPTED */
 		asc = 0x2A;
@@ -733,6 +723,18 @@ ctl_set_illegal_pr_release(struct ctl_scsiio *ctsio)
 }
 
 void
+ctl_set_lun_transit(struct ctl_scsiio *ctsio)
+{
+	/* "Logical unit not ready, asymmetric access state transition" */
+	ctl_set_sense(ctsio,
+		      /*current_error*/ 1,
+		      /*sense_key*/ SSD_KEY_NOT_READY,
+		      /*asc*/ 0x04,
+		      /*ascq*/ 0x0a,
+		      SSD_ELEM_NONE);
+}
+
+void
 ctl_set_lun_standby(struct ctl_scsiio *ctsio)
 {
 	/* "Logical unit not ready, target port in standby state" */
@@ -741,6 +743,18 @@ ctl_set_lun_standby(struct ctl_scsiio *ctsio)
 		      /*sense_key*/ SSD_KEY_NOT_READY,
 		      /*asc*/ 0x04,
 		      /*ascq*/ 0x0b,
+		      SSD_ELEM_NONE);
+}
+
+void
+ctl_set_lun_unavail(struct ctl_scsiio *ctsio)
+{
+	/* "Logical unit not ready, target port in unavailable state" */
+	ctl_set_sense(ctsio,
+		      /*current_error*/ 1,
+		      /*sense_key*/ SSD_KEY_NOT_READY,
+		      /*asc*/ 0x04,
+		      /*ascq*/ 0x0c,
 		      SSD_ELEM_NONE);
 }
 
