@@ -41,9 +41,6 @@ PORTSDIR?=	/usr/ports
 DOCDIR?=	/usr/doc
 RELNOTES_LANG?= en_US.ISO8859-1
 
-.if ${TARGET_ARCH} == "amd64"
-XTRADIR= ${.CURDIR}/xtra
-.endif
 .if !defined(TARGET) || empty(TARGET)
 TARGET=		${MACHINE}
 .endif
@@ -56,6 +53,10 @@ TARGET_ARCH=	${TARGET}
 .endif
 IMAKE=		${MAKE} TARGET_ARCH=${TARGET_ARCH} TARGET=${TARGET}
 DISTDIR=	dist
+
+.if ${TARGET_ARCH} == "amd64"
+XTRADIR= ${.CURDIR}/xtra
+.endif
 
 # Define OSRELEASE by using newvars.sh
 .if !defined(OSRELEASE) || empty(OSRELEASE)
