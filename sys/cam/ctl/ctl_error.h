@@ -57,6 +57,7 @@ void ctl_sense_to_desc(struct scsi_sense_data_fixed *sense_src,
 void ctl_sense_to_fixed(struct scsi_sense_data_desc *sense_src,
 			struct scsi_sense_data_fixed *sense_dest);
 void ctl_set_ua(struct ctl_scsiio *ctsio, int asc, int ascq);
+ctl_ua_type ctl_build_qae(struct ctl_lun *lun, uint32_t initidx, uint8_t *resp);
 ctl_ua_type ctl_build_ua(struct ctl_lun *lun, uint32_t initidx,
     struct scsi_sense_data *sense, scsi_sense_data_type sense_format);
 void ctl_set_overlapped_cmd(struct ctl_scsiio *ctsio);
@@ -72,7 +73,7 @@ void ctl_set_lun_standby(struct ctl_scsiio *ctsio);
 void ctl_set_lun_unavail(struct ctl_scsiio *ctsio);
 void ctl_set_internal_failure(struct ctl_scsiio *ctsio, int sks_valid,
 			      uint16_t retry_count);
-void ctl_set_medium_error(struct ctl_scsiio *ctsio);
+void ctl_set_medium_error(struct ctl_scsiio *ctsio, int read);
 void ctl_set_aborted(struct ctl_scsiio *ctsio);
 void ctl_set_lba_out_of_range(struct ctl_scsiio *ctsio);
 void ctl_set_lun_stopped(struct ctl_scsiio *ctsio);
