@@ -446,6 +446,11 @@ ctl_build_ua(struct ctl_lun *lun, uint32_t initidx,
 		asc = 0x2A;
 		ascq = 0x02;
 		break;
+	case CTL_UA_INQ_CHANGE:
+		/* 3Fh/03h  INQUIRY DATA HAS CHANGED */
+		asc = 0x3F;
+		ascq = 0x03;
+		break;
 	case CTL_UA_RES_PREEMPT:
 		/* 2Ah/03h  RESERVATIONS PREEMPTED */
 		asc = 0x2A;
@@ -840,6 +845,18 @@ ctl_set_task_aborted(struct ctl_scsiio *ctsio)
 	ctsio->scsi_status = SCSI_STATUS_TASK_ABORTED;
 	ctsio->sense_len = 0;
 	ctsio->io_hdr.status = CTL_CMD_ABORTED;
+}
+
+void
+ctl_set_hw_write_protected(struct ctl_scsiio *ctsio)
+{
+	/* "Hardware write protected" */
+	ctl_set_sense(ctsio,
+		      /*current_error*/ 1,
+		      /*sense_key*/ SSD_KEY_DATA_PROTECT,
+		      /*asc*/ 0x27,
+		      /*ascq*/ 0x01,
+		      SSD_ELEM_NONE);
 }
 
 void
