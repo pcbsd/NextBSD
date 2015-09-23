@@ -103,6 +103,9 @@ typedef enum {
 /* The retyable, error action, with table specified error code */
 #define	SS_RET		SS_RETRY|SSQ_DECREMENT_COUNT|SSQ_PRINT_SENSE
 
+/* Wait for transient error status to change */
+#define	SS_WAIT		SS_TUR|SSQ_MANY|SSQ_DECREMENT_COUNT|SSQ_PRINT_SENSE
+
 /* Fatal error action, with table specified error code */
 #define	SS_FATAL	SS_FAIL|SSQ_PRINT_SENSE
 
@@ -695,6 +698,19 @@ struct scsi_control_page {
 	u_int8_t aen_holdoff_period[2];
 	u_int8_t busy_timeout_period[2];
 	u_int8_t extended_selftest_completion_time[2];
+};
+
+struct scsi_control_ext_page {
+	uint8_t page_code;
+	uint8_t subpage_code;
+	uint8_t page_length[2];
+	uint8_t flags;
+#define	SCEP_TCMOS			0x04	/* Timestamp Changeable by */
+#define	SCEP_SCSIP			0x02	/* SCSI Precedence (clock) */
+#define	SCEP_IALUAE			0x01	/* Implicit ALUA Enabled */
+	uint8_t prio;
+	uint8_t max_sense;
+	uint8_t reserve[25];
 };
 
 struct scsi_cache_page {
@@ -1666,6 +1682,7 @@ struct scsi_ec_cscd
 	uint8_t  type_code;
 #define EC_CSCD_EXT		0xff
 	uint8_t  luidt_pdt;
+#define EC_NUL			0x20
 #define EC_LUIDT_MASK		0xc0
 #define EC_LUIDT_LUN		0x00
 #define EC_LUIDT_PROXY_TOKEN	0x40

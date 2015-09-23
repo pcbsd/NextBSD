@@ -91,14 +91,14 @@ typedef enum {
  * WARNING:  Keep the bottom nibble here free, we OR in the data direction
  * flags for each command.
  *
- * Note:  "OK_ON_ALL_LUNS" == we don't have to have a lun configured
+ * Note:  "OK_ON_NO_LUN"   == we don't have to have a lun configured
  *        "OK_ON_BOTH"     == we have to have a lun configured
  *        "SA5"            == command has 5-bit service action at byte 1
  */
 typedef enum {
 	CTL_CMD_FLAG_NONE		= 0x0000,
 	CTL_CMD_FLAG_NO_SENSE		= 0x0010,
-	CTL_CMD_FLAG_OK_ON_ALL_LUNS	= 0x0020,
+	CTL_CMD_FLAG_OK_ON_NO_LUN	= 0x0020,
 	CTL_CMD_FLAG_ALLOW_ON_RESV	= 0x0040,
 	CTL_CMD_FLAG_ALLOW_ON_PR_WRESV	= 0x0080,
 	CTL_CMD_FLAG_OK_ON_PROC		= 0x0100,
@@ -109,7 +109,8 @@ typedef enum {
 	CTL_CMD_FLAG_OK_ON_STANDBY	= 0x1000,
 	CTL_CMD_FLAG_OK_ON_UNAVAIL	= 0x2000,
 	CTL_CMD_FLAG_ALLOW_ON_PR_RESV	= 0x4000,
-	CTL_CMD_FLAG_SA5		= 0x8000
+	CTL_CMD_FLAG_SA5		= 0x8000,
+	CTL_CMD_FLAG_RUN_HERE		= 0x10000
 } ctl_cmd_flags;
 
 typedef enum {
@@ -282,6 +283,9 @@ static const struct ctl_page_index page_index_template[] = {
 	 CTL_PAGE_FLAG_DISK_ONLY, NULL, ctl_caching_sp_handler},
 	{SMS_CONTROL_MODE_PAGE, 0, sizeof(struct scsi_control_page), NULL,
 	 CTL_PAGE_FLAG_NONE, NULL, ctl_control_page_handler},
+	{SMS_CONTROL_MODE_PAGE | SMPH_SPF, 0x01,
+	 sizeof(struct scsi_control_ext_page), NULL,
+	 CTL_PAGE_FLAG_NONE, NULL, NULL},
 	{SMS_INFO_EXCEPTIONS_PAGE, 0, sizeof(struct scsi_info_exceptions_page), NULL,
 	 CTL_PAGE_FLAG_NONE, NULL, NULL},
 	{SMS_INFO_EXCEPTIONS_PAGE | SMPH_SPF, 0x02,
@@ -301,6 +305,7 @@ struct ctl_mode_pages {
 	struct scsi_rigid_disk_page	rigid_disk_page[4];
 	struct scsi_caching_page	caching_page[4];
 	struct scsi_control_page	control_page[4];
+	struct scsi_control_ext_page	control_ext_page[4];
 	struct scsi_info_exceptions_page ie_page[4];
 	struct ctl_logical_block_provisioning_page lbp_page[4];
 	struct copan_debugconf_subpage	debugconf_subpage[4];
@@ -393,6 +398,7 @@ struct ctl_lun {
 	struct scsi_sense_data		pending_sense[CTL_MAX_INITIATORS];
 #endif
 	ctl_ua_type			*pending_ua[CTL_MAX_PORTS];
+	uint8_t				ua_tpt_info[8];
 	time_t				lasttpt;
 	struct ctl_mode_pages		mode_pages;
 	struct ctl_log_pages		log_pages;
