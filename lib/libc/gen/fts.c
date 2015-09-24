@@ -115,9 +115,7 @@ static const char *ufslike_filesystems[] = {
 };
 
 static FTS *
-_fts_open_common(argv, priv)
-	char * const *argv;
-	struct _fts_private *priv;
+_fts_open_common(char * const *argv, struct _fts_private *priv)
 {
 	FTS *sp = &priv->ftsp_fts;
 	FTSENT *p, *root;
@@ -1169,8 +1167,7 @@ fts_padjust(FTS *sp, FTSENT *head)
 }
 
 static size_t
-fts_maxarglen(argv)
-	char * const *argv;
+fts_maxarglen(char * const *argv)
 {
 	size_t len, max;
 

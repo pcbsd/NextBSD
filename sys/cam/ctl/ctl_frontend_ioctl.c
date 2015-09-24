@@ -149,7 +149,7 @@ ctl_ioctl_do_datamove(struct ctl_scsiio *ctsio)
 	 * To simplify things here, if we have a single buffer, stick it in
 	 * a S/G entry and just make it a single entry S/G list.
 	 */
-	if (ctsio->io_hdr.flags & CTL_FLAG_EDPTR_SGLIST) {
+	if (ctsio->ext_sg_entries > 0) {
 		int len_seen;
 
 		ext_sglen = ctsio->ext_sg_entries * sizeof(*ext_sglist);
@@ -157,11 +157,8 @@ ctl_ioctl_do_datamove(struct ctl_scsiio *ctsio)
 		ext_sglist = (struct ctl_sg_entry *)malloc(ext_sglen, M_CTL,
 							   M_WAITOK);
 		ext_sglist_malloced = 1;
-		if (copyin(ctsio->ext_data_ptr, ext_sglist,
-				   ext_sglen) != 0) {
-			ctl_set_internal_failure(ctsio,
-						 /*sks_valid*/ 0,
-						 /*retry_count*/ 0);
+		if (copyin(ctsio->ext_data_ptr, ext_sglist, ext_sglen) != 0) {
+			ctsio->io_hdr.port_status = 31343;
 			goto bailout;
 		}
 		ext_sg_entries = ctsio->ext_sg_entries;
@@ -229,9 +226,7 @@ ctl_ioctl_do_datamove(struct ctl_scsiio *ctsio)
 			CTL_DEBUG_PRINT(("ctl_ioctl_do_datamove: from %p "
 					 "to %p\n", kern_ptr, ext_ptr));
 			if (copyout(kern_ptr, ext_ptr, len_to_copy) != 0) {
-				ctl_set_internal_failure(ctsio,
-							 /*sks_valid*/ 0,
-							 /*retry_count*/ 0);
+				ctsio->io_hdr.port_status = 31344;
 				goto bailout;
 			}
 		} else {
@@ -240,9 +235,7 @@ ctl_ioctl_do_datamove(struct ctl_scsiio *ctsio)
 			CTL_DEBUG_PRINT(("ctl_ioctl_do_datamove: from %p "
 					 "to %p\n", ext_ptr, kern_ptr));
 			if (copyin(ext_ptr, kern_ptr, len_to_copy)!= 0){
-				ctl_set_internal_failure(ctsio,
-							 /*sks_valid*/ 0,
-							 /*retry_count*/0);
+				ctsio->io_hdr.port_status = 31345;
 				goto bailout;
 			}
 		}
