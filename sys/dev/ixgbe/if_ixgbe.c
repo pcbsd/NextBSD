@@ -381,7 +381,7 @@ static int
 ixgbe_if_queues_alloc(if_ctx_t ctx, caddr_t *vaddrs, uint64_t *paddrs, int nqs)
 {
 	struct adapter *adapter = iflib_get_softc(ctx);
-    struct ix_queue *que;
+	struct ix_queue *que;
 	struct ixgbe_tx_buf *bufs;
 	int i;
 	
