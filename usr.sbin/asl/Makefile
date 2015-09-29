@@ -9,7 +9,7 @@ NO_WERROR=yes
 .PATH: ${.CURDIR}/init
 
 
-MK_MAN= no
+MAN= syslog.conf.5 syslogd.8
 
 BASE_INCLUDE=  -I. -I${.CURDIR} -I${.CURDIR}/init -I${.CURDIR}/../../include/apple
 BASE_INCLUDE+= -I${.CURDIR}/../../include -I${.CURDIR}/../../sys
