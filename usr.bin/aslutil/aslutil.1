@@ -86,7 +86,7 @@ prints a usage message.
 The
 .Fl s
 option is used send log messages to the
-.Xr syslogd 8
+.Xr asld 8
 log message daemon,
 either locally or to a remote server if the
 .Fl r Ar host
@@ -158,10 +158,10 @@ or
 for Error).
 .Ss READING MESSAGES
 The 
-.Nm syslogd
+.Nm asld
 daemon filters and saves log messages to different output streams.
 One module saves messages to files specified in the
-.Xr syslog.conf 5
+.Xr asl.conf 5
 file.
 Those log files may be examined with any file printing or editing utility, 
 e.g.
@@ -219,7 +219,7 @@ with the name
 will open all readable files in the ASL store directory /var/log/asl.
 .Pp
 Legacy ASL database files that were written by
-.Nm syslogd
+.Nm asld
 on Mac OS X 10.5 (Leopard) may also be read using the
 .Fl f
 option.
@@ -255,7 +255,7 @@ A number following the
 option specifies the number of messages to print and overrides the default value of 10.
 For example:
 .Pp
-.Dl syslog -w 20
+.Dl aslutil -w 20
 .Pp
 Use the value
 .Dq all
@@ -333,7 +333,7 @@ Dictionary values are strings.
 .Pp
 Each of the format styles above may optionally be followed by a dot character and an integer value, for example:
 .Pp
-.Dl syslog -F std.4
+.Dl aslutil -F std.4
 .Pp
 This causes sub-second time values to be printed.
 In the example above, 4 decimal digits would be printed.
@@ -354,7 +354,7 @@ or
 which will be expanded to the value associated with the named key.
 For example, the command:
 .Pp
-.Dl syslog -F '$Time $Host $(Sender)[$(PID)] <$((Level)(str))>: $Message'
+.Dl aslutil -F '$Time $Host $(Sender)[$(PID)] <$((Level)(str))>: $Message'
 .Pp
 produces output similar to the 
 .Dq std
@@ -448,7 +448,7 @@ Each of the print formats listed above for Time values may optionally be followe
 In that case, sub-second time values will be printed.
 For example, the following line prints messages with a UTC time format, and includes 6 digits of sub-second time:
 .Pp
-.Dl syslog -F '$((Time)(utc.6)) $Host $(Sender)[$(PID)] <$((Level)(str))>: $Message
+.Dl aslutil -F '$((Time)(utc.6)) $Host $(Sender)[$(PID)] <$((Level)(str))>: $Message
 .Pp
 If a custom format is not being used to specify the format for Time values, then Time values
 are generally converted to local time, except when the
@@ -499,7 +499,7 @@ Each of the time formats above may optionally be followed by a dot character and
 In that case, sub-second time values will be printed.
 For example:
 .Pp
-.Dl syslog -T bsd.3
+.Dl aslutil -T bsd.3
 .Pp
 The 
 .Fl u
@@ -548,7 +548,7 @@ may be one of the following:
 .Bl -tag -width "safe"
 .It safe
 This is the default encoding for
-.Nm syslog
+.Nm aslutil
 output.
 Encodes backspace characters as ^H.
 Carriage returns are mapped to newlines.
@@ -600,7 +600,7 @@ A single argument causes a match to occur if a message has the specified key, re
 If two arguments are specified, a match occurs when a message has exactly the specified value for a given key.
 For example, to find all messages sent by the portmap process:
 .Pp
-.Dl syslog -k Sender portmap
+.Dl aslutil -k Sender portmap
 .Pp
 Note that the
 .Fl C
@@ -655,7 +655,7 @@ term matches a message if all of the key-value operations match.
 Logically, the result is an AND of all of key-value operations.
 For example:
 .Pp
-.Dl syslog -k Sender portmap -k Time ge -2h
+.Dl aslutil -k Sender portmap -k Time ge -2h
 .Pp
 finds all messages sent by portmap in the last 2 hours
 (-2h means "two hours ago").
@@ -672,14 +672,14 @@ value of
 .Dq portmap
 or that have a numeric priority level of 4 or less:
 .Pp
-.Dl syslog -k Sender portmap -o -k Level Nle 4
+.Dl aslutil -k Sender portmap -o -k Level Nle 4
 .Pp
 Log priority levels are internally handled as an integer value between 0 and 7.
 Level values in expressions may either be given as integers, or as string equivalents.
 See the table string values in the SENDING MESSAGES section for details.
 The example query above could also be specified with the command:
 .Pp
-.Dl syslog -k Sender portmap -o -k Level Nle warning
+.Dl aslutil -k Sender portmap -o -k Level Nle warning
 .Pp
 .Pp
 A special convention exists for matching time stamps.
@@ -688,7 +688,7 @@ An unsigned integer value is regarded as the given number of seconds since
 An negative integer value is regarded as the given number of seconds before the current time.
 For example, to find all messages of Error priority level (3) or less which were logged in the last 30 seconds:
 .Pp
-.Dl syslog -k Level Nle error -k Time ge -30
+.Dl aslutil -k Level Nle error -k Time ge -30
 .Pp
 a relative time value may be optionally followed by one of the characters 
 .Dq s ,
@@ -707,7 +707,7 @@ or
 .Xr syslog 3
 interfaces may specify a log filter mask.
 The mask specifies which messages should be sent to the
-.Nm syslogd
+.Nm asld 
 daemon by specifying a yes/no setting for each priority level.
 Many clients set a filter mask to avoid sending relatively unimportant messages.
 Debug or Info priority level messages are generally only useful for debugging operations.
@@ -729,7 +729,7 @@ Root user access is required to set the master filter value.
 .Pp
 The current setting of the master filter mask may be inspected using:
 .Pp
-.Dl syslog -c 0
+.Dl aslutil -c 0
 .Pp
 The value of the master filter mask my be set by providing a second argument following
 .Fl c Ar 0 .
@@ -741,7 +741,7 @@ The character
 may be used for Error, as it is used for sending messages.
 The master filter may be unset with:
 .Pp
-.Dl syslog -c 0 off
+.Dl aslutil -c 0 off
 .Pp
 Since it is common to use the filter as a 
 .Dq cutoff
@@ -754,7 +754,7 @@ uses a filter mask starting at level 0 (Emergency)
 the given level.
 For example, to set the master filter level to cause all processes to log messages from Emergency up to Debug:
 .Pp
-.Dl syslog -c 0 -d
+.Dl aslutil -c 0 -d
 .Pp
 While the master filter level may be set to control the messages produced by all processes,
 another filter mask may be specified for an individual process. 
@@ -771,24 +771,24 @@ as described above for the master filter mask.
 Root access is required to set the per-process filter mask for system (UID 0) processes.
 .Pp
 The 
-.Nm syslogd
+.Nm asld
 server follows filtering rules specified in the /etc/asl.conf file.
 When the remote-control mechanism is used to change the filter of a process,
-.Nm syslogd
+.Nm asld
 will save any messages received from that process until the remote-control filter is turned off.
 .Ss SERVER CONFIGURATION
 When
-.Nm syslogd
+.Nm asld
 starts up, and when it receives a HUP signal, it re-reads its configuration settings from /etc/asl.conf.
 It is sometimes useful to change configuration parameters temporarily, without needing to make changes
 to the configuration file.
 Any of the configuration options that may be set in the file (following an ``='' character) may also
-be sent to syslogd using the
+be sent to asld using the
 .Fl config
 flag (without an ``='' character).
 For example, to temporarily disable the kernel message-per-second limit:
 .Pp
-.Dl syslog -config mps_limit 0
+.Dl aslutil -config mps_limit 0
 .Pp
 Note that only the superuser (root) may change configuration parameters.
 .Pp
@@ -796,14 +796,14 @@ In addition to the parameter setting options that are described in the
 .Xr asl.conf 5
 manual page, an additional option:
 .Pp
-.Dl syslog -config reset
+.Dl aslutil -config reset
 .Pp
 will cause
-.Nm syslogd
+.Nm asld
 to reset its configuration.
 .Ss ASL OUTPUT MODULES
 ASL Output Modules are named configuration bundles used by the ASL server
-.Nm syslogd ,
+.Nm asld ,
 and by the ASL filesystem manager
 .Nm aslmanager .
 The /etc/asl.conf file represents the system's primary output module,
@@ -816,7 +816,7 @@ ASL Output Modules are described in detail in
 .Pp
 When invoked with
 .Fl module ,
-.Nm syslog
+.Nm asld
 prints a summary of all loaded ASL Output Modules.
 The summary includes the output files and ASL store directories used by each module,
 a list of the module's configuration rules, and the module's current enabled or disabled status.
@@ -825,7 +825,7 @@ prints a summary for the module with the given name.
 .Pp
 ASL Output Modules may be enabled or disabled using the command:
 .Pp
-    syslog -module 
+    aslutil -module 
 .Ar name
 enable 
 .Op 0
@@ -840,7 +840,7 @@ com.apple.asl may be enabled or disabled, but only specifically by name.
 .Pp
 If a module includes rotated files, the command:
 .Pp
-	syslog -module 
+	aslutil -module 
 .Ar name
 checkpoint
 .Op file
@@ -855,13 +855,13 @@ including the primary com.apple.asl module.
 Note that only the superuser (root) may force files to be checkpointed.
 .Pp
 The checkpoint action sends a command to
-.Nm syslogd 
+.Nm asld
 and waits for a reply to be returned.
 This means that any files currently in use will be checkpointed when the
-.Nm syslog
+.Nm aslutil
 command completes.
 .Sh SEE ALSO
-.Xr syslogd 8 ,
+.Xr asld 8 ,
 .Xr logger 1 ,
 .Xr asl 3 ,
 .Xr syslog 3 ,
@@ -869,4 +869,6 @@ command completes.
 .Sh HISTORY
 The
 .Nm
-utility appeared in Mac OS X 10.4.
+utility appeared as
+.Nm syslog
+in Mac OS X 10.4.
