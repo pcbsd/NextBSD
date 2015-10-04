@@ -82,6 +82,9 @@
 #define OS_OBJECT_HAVE_OBJC_SUPPORT 0
 #endif // USE_OBJC
 
+#ifdef HAVE_PTHREAD_WORKQUEUES
+#include <pthread_workequeue.h>
+
 #include <dispatch/dispatch.h>
 #include <dispatch/base.h>
 
