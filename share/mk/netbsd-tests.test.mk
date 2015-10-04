@@ -24,8 +24,8 @@ LIBNETBSD_OBJDIR=	${OBJTOP}/lib/libnetbsd
 CFLAGS.$t+=	-I${LIBNETBSD_SRCDIR} -I${SRCTOP}/contrib/netbsd-tests
 LDFLAGS.$t+=	-L${LIBNETBSD_OBJDIR}
 
-#DPADD.$t+=	${LIBNETBSD}
-#LDADD.$t+=	-lnetbsd
+DPADD.$t+=	${LIBNETBSD}
+LDADD.$t+=	-lnetbsd
 
 SRCS.$t?=	${t:C/^/t_/:C/_test$//g}.c
 .endfor
