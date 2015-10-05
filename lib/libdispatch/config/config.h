@@ -100,7 +100,7 @@
 #define HAVE_PTHREAD_NP_H 1
 
 /* Define if pthread work queues are present */
-/* #undef HAVE_PTHREAD_WORKQUEUES */
+#define HAVE_PTHREAD_WORKQUEUES 1
 
 /* Define to 1 if you have the `pthread_workqueue_setdispatch_np' function. */
 #define HAVE_PTHREAD_WORKQUEUE_SETDISPATCH_NP 1
