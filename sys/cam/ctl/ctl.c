@@ -69,6 +69,7 @@ __FBSDID("$FreeBSD$");
 
 #include <cam/cam.h>
 #include <cam/scsi/scsi_all.h>
+#include <cam/scsi/scsi_cd.h>
 #include <cam/scsi/scsi_da.h>
 #include <cam/ctl/ctl_io.h>
 #include <cam/ctl/ctl.h>
@@ -351,6 +352,52 @@ const static struct ctl_logical_block_provisioning_page lbp_page_changeable = {{
 	  /*reserved*/{0, 0},
 	  /*count*/{0, 0, 0, 0}}
 	}
+};
+
+const static struct scsi_cddvd_capabilities_page cddvd_page_default = {
+	/*page_code*/SMS_CDDVD_CAPS_PAGE,
+	/*page_length*/sizeof(struct scsi_cddvd_capabilities_page) - 2,
+	/*caps1*/0x3f,
+	/*caps2*/0x00,
+	/*caps3*/0xf0,
+	/*caps4*/0x00,
+	/*caps5*/0x29,
+	/*caps6*/0x00,
+	/*obsolete*/{0, 0},
+	/*nvol_levels*/{0, 0},
+	/*buffer_size*/{8, 0},
+	/*obsolete2*/{0, 0},
+	/*reserved*/0,
+	/*digital*/0,
+	/*obsolete3*/0,
+	/*copy_management*/0,
+	/*reserved2*/0,
+	/*rotation_control*/0,
+	/*cur_write_speed*/0,
+	/*num_speed_descr*/0,
+};
+
+const static struct scsi_cddvd_capabilities_page cddvd_page_changeable = {
+	/*page_code*/SMS_CDDVD_CAPS_PAGE,
+	/*page_length*/sizeof(struct scsi_cddvd_capabilities_page) - 2,
+	/*caps1*/0,
+	/*caps2*/0,
+	/*caps3*/0,
+	/*caps4*/0,
+	/*caps5*/0,
+	/*caps6*/0,
+	/*obsolete*/{0, 0},
+	/*nvol_levels*/{0, 0},
+	/*buffer_size*/{0, 0},
+	/*obsolete2*/{0, 0},
+	/*reserved*/0,
+	/*digital*/0,
+	/*obsolete3*/0,
+	/*copy_management*/0,
+	/*reserved2*/0,
+	/*rotation_control*/0,
+	/*cur_write_speed*/0,
+	/*num_speed_descr*/0,
 };
 
 SYSCTL_NODE(_kern_cam, OID_AUTO, ctl, CTLFLAG_RD, 0, "CAM Target Layer");
@@ -3715,46 +3762,6 @@ ctl_zero_io(union ctl_io *io)
 	io->io_hdr.pool = pool_ref;
 }
 
-/*
- * This routine is currently used for internal copies of ctl_ios that need
- * to persist for some reason after we've already returned status to the
- * FETD.  (Thus the flag set.)
- *
- * XXX XXX
- * Note that this makes a blind copy of all fields in the ctl_io, except
- * for the pool reference.  This includes any memory that has been
- * allocated!  That memory will no longer be valid after done has been
- * called, so this would be VERY DANGEROUS for command that actually does
- * any reads or writes.  Right now (11/7/2005), this is only used for immediate
- * start and stop commands, which don't transfer any data, so this is not a
- * problem.  If it is used for anything else, the caller would also need to
- * allocate data buffer space and this routine would need to be modified to
- * copy the data buffer(s) as well.
- */
-void
-ctl_copy_io(union ctl_io *src, union ctl_io *dest)
-{
-	void *pool_ref;
-
-	if ((src == NULL)
-	 || (dest == NULL))
-		return;
-
-	/*
-	 * May need to preserve linked list pointers at some point too.
-	 */
-	pool_ref = dest->io_hdr.pool;
-
-	memcpy(dest, src, MIN(sizeof(*src), sizeof(*dest)));
-
-	dest->io_hdr.pool = pool_ref;
-	/*
-	 * We need to know that this is an internal copy, and doesn't need
-	 * to get passed back to the FETD that allocated it.
-	 */
-	dest->io_hdr.flags |= CTL_FLAG_INT_COPY;
-}
-
 int
 ctl_expand_number(const char *buf, uint64_t *num)
 {
@@ -3819,8 +3826,14 @@ ctl_init_page_index(struct ctl_lun *lun)
 	for (i = 0; i < CTL_NUM_MODE_PAGES; i++) {
 
 		page_index = &lun->mode_pages.index[i];
-		if (lun->be_lun->lun_type != T_DIRECT &&
-		    (page_index->page_flags & CTL_PAGE_FLAG_DISK_ONLY))
+		if (lun->be_lun->lun_type == T_DIRECT &&
+		    (page_index->page_flags & CTL_PAGE_FLAG_DIRECT) == 0)
+			continue;
+		if (lun->be_lun->lun_type == T_PROCESSOR &&
+		    (page_index->page_flags & CTL_PAGE_FLAG_PROC) == 0)
+			continue;
+		if (lun->be_lun->lun_type == T_CDROM &&
+		    (page_index->page_flags & CTL_PAGE_FLAG_CDROM) == 0)
 			continue;
 
 		switch (page_index->page_code & SMPH_PC_MASK) {
@@ -4152,6 +4165,23 @@ ctl_init_page_index(struct ctl_lun *lun)
 			}}
 			break;
 		}
+		case SMS_CDDVD_CAPS_PAGE:{
+			memcpy(&lun->mode_pages.cddvd_page[CTL_PAGE_DEFAULT],
+			       &cddvd_page_default,
+			       sizeof(cddvd_page_default));
+			memcpy(&lun->mode_pages.cddvd_page[
+			       CTL_PAGE_CHANGEABLE], &cddvd_page_changeable,
+			       sizeof(cddvd_page_changeable));
+			memcpy(&lun->mode_pages.cddvd_page[CTL_PAGE_SAVED],
+			       &cddvd_page_default,
+			       sizeof(cddvd_page_default));
+			memcpy(&lun->mode_pages.cddvd_page[CTL_PAGE_CURRENT],
+			       &lun->mode_pages.cddvd_page[CTL_PAGE_SAVED],
+			       sizeof(cddvd_page_default));
+			page_index->page_data =
+				(uint8_t *)lun->mode_pages.cddvd_page;
+			break;
+		}
 		case SMS_VENDOR_SPECIFIC_PAGE:{
 			switch (page_index->subpage) {
 			case DBGCNF_SUBPAGE_CODE: {
@@ -4205,8 +4235,14 @@ ctl_init_log_page_index(struct ctl_lun *lun)
 	for (i = 0, j = 0, k = 0; i < CTL_NUM_LOG_PAGES; i++) {
 
 		page_index = &lun->log_pages.index[i];
-		if (lun->be_lun->lun_type != T_DIRECT &&
-		    (page_index->page_flags & CTL_PAGE_FLAG_DISK_ONLY))
+		if (lun->be_lun->lun_type == T_DIRECT &&
+		    (page_index->page_flags & CTL_PAGE_FLAG_DIRECT) == 0)
+			continue;
+		if (lun->be_lun->lun_type == T_PROCESSOR &&
+		    (page_index->page_flags & CTL_PAGE_FLAG_PROC) == 0)
+			continue;
+		if (lun->be_lun->lun_type == T_CDROM &&
+		    (page_index->page_flags & CTL_PAGE_FLAG_CDROM) == 0)
 			continue;
 
 		if (page_index->page_code == SLS_LOGICAL_BLOCK_PROVISIONING &&
@@ -4282,7 +4318,7 @@ ctl_alloc_lun(struct ctl_softc *ctl_softc, struct ctl_lun *ctl_lun,
 	struct ctl_lun *nlun, *lun;
 	struct scsi_vpd_id_descriptor *desc;
 	struct scsi_vpd_id_t10 *t10id;
-	const char *eui, *naa, *scsiname, *vendor;
+	const char *eui, *naa, *scsiname, *vendor, *value;
 	int lun_number, i, lun_malloced;
 	int devidlen, idlen1, idlen2 = 0, len;
 
@@ -4294,8 +4330,8 @@ ctl_alloc_lun(struct ctl_softc *ctl_softc, struct ctl_lun *ctl_lun,
 	 */
 	switch (be_lun->lun_type) {
 	case T_DIRECT:
-		break;
 	case T_PROCESSOR:
+	case T_CDROM:
 		break;
 	case T_SEQUENTIAL:
 	case T_CHANGER:
@@ -4436,17 +4472,22 @@ ctl_alloc_lun(struct ctl_softc *ctl_softc, struct ctl_lun *ctl_lun,
 	be_lun->ctl_lun = lun;
 	be_lun->lun_id = lun_number;
 	atomic_add_int(&be_lun->be->num_luns, 1);
-	if (be_lun->flags & CTL_LUN_FLAG_OFFLINE)
-		lun->flags |= CTL_LUN_OFFLINE;
-
-	if (be_lun->flags & CTL_LUN_FLAG_POWERED_OFF)
+	if (be_lun->flags & CTL_LUN_FLAG_EJECTED)
+		lun->flags |= CTL_LUN_EJECTED;
+	if (be_lun->flags & CTL_LUN_FLAG_NO_MEDIA)
+		lun->flags |= CTL_LUN_NO_MEDIA;
+	if (be_lun->flags & CTL_LUN_FLAG_STOPPED)
 		lun->flags |= CTL_LUN_STOPPED;
-
-	if (be_lun->flags & CTL_LUN_FLAG_INOPERABLE)
-		lun->flags |= CTL_LUN_INOPERABLE;
 
 	if (be_lun->flags & CTL_LUN_FLAG_PRIMARY)
 		lun->flags |= CTL_LUN_PRIMARY_SC;
+
+	value = ctl_get_opt(&be_lun->options, "removable");
+	if (value != NULL) {
+		if (strcmp(value, "on") == 0)
+			lun->flags |= CTL_LUN_REMOVABLE;
+	} else if (be_lun->lun_type == T_CDROM)
+		lun->flags |= CTL_LUN_REMOVABLE;
 
 	lun->ctl_softc = ctl_softc;
 #ifdef CTL_TIME_IO
@@ -4697,23 +4738,51 @@ ctl_stop_lun(struct ctl_be_lun *be_lun)
 }
 
 int
-ctl_lun_offline(struct ctl_be_lun *be_lun)
+ctl_lun_no_media(struct ctl_be_lun *be_lun)
 {
 	struct ctl_lun *lun = (struct ctl_lun *)be_lun->ctl_lun;
 
 	mtx_lock(&lun->lun_lock);
-	lun->flags |= CTL_LUN_OFFLINE;
+	lun->flags |= CTL_LUN_NO_MEDIA;
 	mtx_unlock(&lun->lun_lock);
 	return (0);
 }
 
 int
-ctl_lun_online(struct ctl_be_lun *be_lun)
+ctl_lun_has_media(struct ctl_be_lun *be_lun)
+{
+	struct ctl_lun *lun = (struct ctl_lun *)be_lun->ctl_lun;
+	union ctl_ha_msg msg;
+
+	mtx_lock(&lun->lun_lock);
+	lun->flags &= ~(CTL_LUN_NO_MEDIA | CTL_LUN_EJECTED);
+	if (lun->flags & CTL_LUN_REMOVABLE)
+		ctl_est_ua_all(lun, -1, CTL_UA_MEDIUM_CHANGE);
+	mtx_unlock(&lun->lun_lock);
+	if ((lun->flags & CTL_LUN_REMOVABLE) &&
+	    lun->ctl_softc->ha_mode == CTL_HA_MODE_XFER) {
+		bzero(&msg.ua, sizeof(msg.ua));
+		msg.hdr.msg_type = CTL_MSG_UA;
+		msg.hdr.nexus.initid = -1;
+		msg.hdr.nexus.targ_port = -1;
+		msg.hdr.nexus.targ_lun = lun->lun;
+		msg.hdr.nexus.targ_mapped_lun = lun->lun;
+		msg.ua.ua_all = 1;
+		msg.ua.ua_set = 1;
+		msg.ua.ua_type = CTL_UA_MEDIUM_CHANGE;
+		ctl_ha_msg_send(CTL_HA_CHAN_CTL, &msg, sizeof(msg.ua),
+		    M_WAITOK);
+	}
+	return (0);
+}
+
+int
+ctl_lun_ejected(struct ctl_be_lun *be_lun)
 {
 	struct ctl_lun *lun = (struct ctl_lun *)be_lun->ctl_lun;
 
 	mtx_lock(&lun->lun_lock);
-	lun->flags &= ~CTL_LUN_OFFLINE;
+	lun->flags |= CTL_LUN_EJECTED;
 	mtx_unlock(&lun->lun_lock);
 	return (0);
 }
@@ -4783,28 +4852,6 @@ ctl_invalidate_lun(struct ctl_be_lun *be_lun)
 	return (0);
 }
 
-int
-ctl_lun_inoperable(struct ctl_be_lun *be_lun)
-{
-	struct ctl_lun *lun = (struct ctl_lun *)be_lun->ctl_lun;
-
-	mtx_lock(&lun->lun_lock);
-	lun->flags |= CTL_LUN_INOPERABLE;
-	mtx_unlock(&lun->lun_lock);
-	return (0);
-}
-
-int
-ctl_lun_operable(struct ctl_be_lun *be_lun)
-{
-	struct ctl_lun *lun = (struct ctl_lun *)be_lun->ctl_lun;
-
-	mtx_lock(&lun->lun_lock);
-	lun->flags &= ~CTL_LUN_INOPERABLE;
-	mtx_unlock(&lun->lun_lock);
-	return (0);
-}
-
 void
 ctl_lun_capacity_changed(struct ctl_be_lun *be_lun)
 {
@@ -4812,7 +4859,7 @@ ctl_lun_capacity_changed(struct ctl_be_lun *be_lun)
 	union ctl_ha_msg msg;
 
 	mtx_lock(&lun->lun_lock);
-	ctl_est_ua_all(lun, -1, CTL_UA_CAPACITY_CHANGED);
+	ctl_est_ua_all(lun, -1, CTL_UA_CAPACITY_CHANGE);
 	mtx_unlock(&lun->lun_lock);
 	if (lun->ctl_softc->ha_mode == CTL_HA_MODE_XFER) {
 		/* Send msg to other side. */
@@ -4824,7 +4871,7 @@ ctl_lun_capacity_changed(struct ctl_be_lun *be_lun)
 		msg.hdr.nexus.targ_mapped_lun = lun->lun;
 		msg.ua.ua_all = 1;
 		msg.ua.ua_set = 1;
-		msg.ua.ua_type = CTL_UA_CAPACITY_CHANGED;
+		msg.ua.ua_type = CTL_UA_CAPACITY_CHANGE;
 		ctl_ha_msg_send(CTL_HA_CHAN_CTL, &msg, sizeof(msg.ua),
 		    M_WAITOK);
 	}
@@ -5082,82 +5129,81 @@ ctl_start_stop(struct ctl_scsiio *ctsio)
 	lun = (struct ctl_lun *)ctsio->io_hdr.ctl_private[CTL_PRIV_LUN].ptr;
 	cdb = (struct scsi_start_stop_unit *)ctsio->cdb;
 
-	/*
-	 * XXX KDM
-	 * We don't support the immediate bit on a stop unit.  In order to
-	 * do that, we would need to code up a way to know that a stop is
-	 * pending, and hold off any new commands until it completes, one
-	 * way or another.  Then we could accept or reject those commands
-	 * depending on its status.  We would almost need to do the reverse
-	 * of what we do below for an immediate start -- return the copy of
-	 * the ctl_io to the FETD with status to send to the host (and to
-	 * free the copy!) and then free the original I/O once the stop
-	 * actually completes.  That way, the OOA queue mechanism can work
-	 * to block commands that shouldn't proceed.  Another alternative
-	 * would be to put the copy in the queue in place of the original,
-	 * and return the original back to the caller.  That could be
-	 * slightly safer..
-	 */
-	if ((cdb->byte2 & SSS_IMMED)
-	 && ((cdb->how & SSS_START) == 0)) {
-		ctl_set_invalid_field(ctsio,
-				      /*sks_valid*/ 1,
-				      /*command*/ 1,
-				      /*field*/ 1,
-				      /*bit_valid*/ 1,
-				      /*bit*/ 0);
-		ctl_done((union ctl_io *)ctsio);
-		return (CTL_RETVAL_COMPLETE);
-	}
+	if ((cdb->how & SSS_PC_MASK) == 0) {
+		if ((lun->flags & CTL_LUN_PR_RESERVED) &&
+		    (cdb->how & SSS_START) == 0) {
+			uint32_t residx;
 
-	if ((lun->flags & CTL_LUN_PR_RESERVED)
-	 && ((cdb->how & SSS_START)==0)) {
-		uint32_t residx;
+			residx = ctl_get_initindex(&ctsio->io_hdr.nexus);
+			if (ctl_get_prkey(lun, residx) == 0 ||
+			    (lun->pr_res_idx != residx && lun->res_type < 4)) {
 
-		residx = ctl_get_initindex(&ctsio->io_hdr.nexus);
-		if (ctl_get_prkey(lun, residx) == 0
-		 || (lun->pr_res_idx!=residx && lun->res_type < 4)) {
+				ctl_set_reservation_conflict(ctsio);
+				ctl_done((union ctl_io *)ctsio);
+				return (CTL_RETVAL_COMPLETE);
+			}
+		}
 
-			ctl_set_reservation_conflict(ctsio);
+		if ((cdb->how & SSS_LOEJ) &&
+		    (lun->flags & CTL_LUN_REMOVABLE) == 0) {
+			ctl_set_invalid_field(ctsio,
+					      /*sks_valid*/ 1,
+					      /*command*/ 1,
+					      /*field*/ 4,
+					      /*bit_valid*/ 1,
+					      /*bit*/ 1);
+			ctl_done((union ctl_io *)ctsio);
+			return (CTL_RETVAL_COMPLETE);
+		}
+
+		if ((cdb->how & SSS_START) == 0 && (cdb->how & SSS_LOEJ) &&
+		    lun->prevent_count > 0) {
+			/* "Medium removal prevented" */
+			ctl_set_sense(ctsio, /*current_error*/ 1,
+			    /*sense_key*/(lun->flags & CTL_LUN_NO_MEDIA) ?
+			     SSD_KEY_NOT_READY : SSD_KEY_ILLEGAL_REQUEST,
+			    /*asc*/ 0x53, /*ascq*/ 0x02, SSD_ELEM_NONE);
 			ctl_done((union ctl_io *)ctsio);
 			return (CTL_RETVAL_COMPLETE);
 		}
 	}
 
-	/*
-	 * If there is no backend on this device, we can't start or stop
-	 * it.  In theory we shouldn't get any start/stop commands in the
-	 * first place at this level if the LUN doesn't have a backend.
-	 * That should get stopped by the command decode code.
-	 */
-	if (lun->backend == NULL) {
+	retval = lun->backend->config_write((union ctl_io *)ctsio);
+	return (retval);
+}
+
+int
+ctl_prevent_allow(struct ctl_scsiio *ctsio)
+{
+	struct ctl_lun *lun;
+	struct scsi_prevent *cdb;
+	int retval;
+	uint32_t initidx;
+
+	CTL_DEBUG_PRINT(("ctl_prevent_allow\n"));
+
+	lun = (struct ctl_lun *)ctsio->io_hdr.ctl_private[CTL_PRIV_LUN].ptr;
+	cdb = (struct scsi_prevent *)ctsio->cdb;
+
+	if ((lun->flags & CTL_LUN_REMOVABLE) == 0) {
 		ctl_set_invalid_opcode(ctsio);
 		ctl_done((union ctl_io *)ctsio);
 		return (CTL_RETVAL_COMPLETE);
 	}
 
-	/*
-	 * In the non-immediate case, we send the request to
-	 * the backend and return status to the user when
-	 * it is done.
-	 *
-	 * In the immediate case, we allocate a new ctl_io
-	 * to hold a copy of the request, and send that to
-	 * the backend.  We then set good status on the
-	 * user's request and return it immediately.
-	 */
-	if (cdb->byte2 & SSS_IMMED) {
-		union ctl_io *new_io;
-
-		new_io = ctl_alloc_io(ctsio->io_hdr.pool);
-		ctl_copy_io((union ctl_io *)ctsio, new_io);
-		retval = lun->backend->config_write(new_io);
-		ctl_set_success(ctsio);
-		ctl_done((union ctl_io *)ctsio);
-	} else {
-		retval = lun->backend->config_write(
-			(union ctl_io *)ctsio);
+	initidx = ctl_get_initindex(&ctsio->io_hdr.nexus);
+	mtx_lock(&lun->lun_lock);
+	if ((cdb->how & PR_PREVENT) &&
+	    ctl_is_set(lun->prevent, initidx) == 0) {
+		ctl_set_mask(lun->prevent, initidx);
+		lun->prevent_count++;
+	} else if ((cdb->how & PR_PREVENT) == 0 &&
+	    ctl_is_set(lun->prevent, initidx)) {
+		ctl_clear_mask(lun->prevent, initidx);
+		lun->prevent_count--;
 	}
+	mtx_unlock(&lun->lun_lock);
+	retval = lun->backend->config_write((union ctl_io *)ctsio);
 	return (retval);
 }
 
@@ -5218,15 +5264,6 @@ ctl_sync_cache(struct ctl_scsiio *ctsio)
 	 */
 	if ((starting_lba + block_count) > (lun->be_lun->maxlba + 1)) {
 		ctl_set_lba_out_of_range(ctsio);
-		ctl_done((union ctl_io *)ctsio);
-		goto bailout;
-	}
-
-	/*
-	 * If this LUN has no backend, we can't flush the cache anyway.
-	 */
-	if (lun->backend == NULL) {
-		ctl_set_invalid_opcode(ctsio);
 		ctl_done((union ctl_io *)ctsio);
 		goto bailout;
 	}
@@ -5314,17 +5351,6 @@ ctl_format(struct ctl_scsiio *ctsio)
 			}
 		}
 	}
-
-	/*
-	 * The format command will clear out the "Medium format corrupted"
-	 * status if set by the configuration code.  That status is really
-	 * just a way to notify the host that we have lost the media, and
-	 * get them to issue a command that will basically make them think
-	 * they're blowing away the media.
-	 */
-	mtx_lock(&lun->lun_lock);
-	lun->flags &= ~CTL_LUN_INOPERABLE;
-	mtx_unlock(&lun->lun_lock);
 
 	ctl_set_success(ctsio);
 bailout:
@@ -5933,13 +5959,18 @@ do_next_page:
 	 * XXX KDM should we do something with the block descriptor?
 	 */
 	for (i = 0; i < CTL_NUM_MODE_PAGES; i++) {
-
-		if (lun->be_lun->lun_type != T_DIRECT &&
-		    (lun->mode_pages.index[i].page_flags &
-		     CTL_PAGE_FLAG_DISK_ONLY))
+		page_index = &lun->mode_pages.index[i];
+		if (lun->be_lun->lun_type == T_DIRECT &&
+		    (page_index->page_flags & CTL_PAGE_FLAG_DIRECT) == 0)
+			continue;
+		if (lun->be_lun->lun_type == T_PROCESSOR &&
+		    (page_index->page_flags & CTL_PAGE_FLAG_PROC) == 0)
+			continue;
+		if (lun->be_lun->lun_type == T_CDROM &&
+		    (page_index->page_flags & CTL_PAGE_FLAG_CDROM) == 0)
 			continue;
 
-		if ((lun->mode_pages.index[i].page_code & SMPH_PC_MASK) !=
+		if ((page_index->page_code & SMPH_PC_MASK) !=
 		    (page_header->page_code & SMPH_PC_MASK))
 			continue;
 
@@ -5947,9 +5978,8 @@ do_next_page:
 		 * If neither page has a subpage code, then we've got a
 		 * match.
 		 */
-		if (((lun->mode_pages.index[i].page_code & SMPH_SPF) == 0)
+		if (((page_index->page_code & SMPH_SPF) == 0)
 		 && ((page_header->page_code & SMPH_SPF) == 0)) {
-			page_index = &lun->mode_pages.index[i];
 			page_len = page_header->page_length;
 			break;
 		}
@@ -5958,15 +5988,12 @@ do_next_page:
 		 * If both pages have subpages, then the subpage numbers
 		 * have to match.
 		 */
-		if ((lun->mode_pages.index[i].page_code & SMPH_SPF)
+		if ((page_index->page_code & SMPH_SPF)
 		  && (page_header->page_code & SMPH_SPF)) {
 			struct scsi_mode_page_header_sp *sph;
 
 			sph = (struct scsi_mode_page_header_sp *)page_header;
-
-			if (lun->mode_pages.index[i].subpage ==
-			    sph->subpage) {
-				page_index = &lun->mode_pages.index[i];
+			if (page_index->subpage == sph->subpage) {
 				page_len = scsi_2btoul(sph->page_length);
 				break;
 			}
@@ -5977,7 +6004,7 @@ do_next_page:
 	 * If we couldn't find the page, or if we don't have a mode select
 	 * handler for it, send back an error to the user.
 	 */
-	if ((page_index == NULL)
+	if ((i >= CTL_NUM_MODE_PAGES)
 	 || (page_index->select_handler == NULL)) {
 		ctl_set_invalid_field(ctsio,
 				      /*sks_valid*/ 1,
@@ -6236,7 +6263,6 @@ ctl_mode_sense(struct ctl_scsiio *ctsio)
 	dbd = 0;
 	llba = 0;
 	block_desc = NULL;
-	page_index = NULL;
 
 	CTL_DEBUG_PRINT(("ctl_mode_sense\n"));
 
@@ -6313,26 +6339,33 @@ ctl_mode_sense(struct ctl_scsiio *ctsio)
 		}
 
 		for (i = 0; i < CTL_NUM_MODE_PAGES; i++) {
-			if (lun->be_lun->lun_type != T_DIRECT &&
-			    (lun->mode_pages.index[i].page_flags &
-			     CTL_PAGE_FLAG_DISK_ONLY))
+			page_index = &lun->mode_pages.index[i];
+
+			/* Make sure the page is supported for this dev type */
+			if (lun->be_lun->lun_type == T_DIRECT &&
+			    (page_index->page_flags & CTL_PAGE_FLAG_DIRECT) == 0)
+				continue;
+			if (lun->be_lun->lun_type == T_PROCESSOR &&
+			    (page_index->page_flags & CTL_PAGE_FLAG_PROC) == 0)
+				continue;
+			if (lun->be_lun->lun_type == T_CDROM &&
+			    (page_index->page_flags & CTL_PAGE_FLAG_CDROM) == 0)
 				continue;
 
 			/*
 			 * We don't use this subpage if the user didn't
 			 * request all subpages.
 			 */
-			if ((lun->mode_pages.index[i].subpage != 0)
+			if ((page_index->subpage != 0)
 			 && (subpage == SMS_SUBPAGE_PAGE_0))
 				continue;
 
 #if 0
 			printf("found page %#x len %d\n",
-			       lun->mode_pages.index[i].page_code &
-			       SMPH_PC_MASK,
-			       lun->mode_pages.index[i].page_len);
+			       page_index->page_code & SMPH_PC_MASK,
+			       page_index->page_len);
 #endif
-			page_len += lun->mode_pages.index[i].page_len;
+			page_len += page_index->page_len;
 		}
 		break;
 	}
@@ -6342,30 +6375,35 @@ ctl_mode_sense(struct ctl_scsiio *ctsio)
 		page_len = 0;
 
 		for (i = 0; i < CTL_NUM_MODE_PAGES; i++) {
+			page_index = &lun->mode_pages.index[i];
+
+			/* Make sure the page is supported for this dev type */
+			if (lun->be_lun->lun_type == T_DIRECT &&
+			    (page_index->page_flags & CTL_PAGE_FLAG_DIRECT) == 0)
+				continue;
+			if (lun->be_lun->lun_type == T_PROCESSOR &&
+			    (page_index->page_flags & CTL_PAGE_FLAG_PROC) == 0)
+				continue;
+			if (lun->be_lun->lun_type == T_CDROM &&
+			    (page_index->page_flags & CTL_PAGE_FLAG_CDROM) == 0)
+				continue;
+
 			/* Look for the right page code */
-			if ((lun->mode_pages.index[i].page_code &
-			     SMPH_PC_MASK) != page_code)
+			if ((page_index->page_code & SMPH_PC_MASK) != page_code)
 				continue;
 
 			/* Look for the right subpage or the subpage wildcard*/
-			if ((lun->mode_pages.index[i].subpage != subpage)
+			if ((page_index->subpage != subpage)
 			 && (subpage != SMS_SUBPAGE_ALL))
-				continue;
-
-			/* Make sure the page is supported for this dev type */
-			if (lun->be_lun->lun_type != T_DIRECT &&
-			    (lun->mode_pages.index[i].page_flags &
-			     CTL_PAGE_FLAG_DISK_ONLY))
 				continue;
 
 #if 0
 			printf("found page %#x len %d\n",
-			       lun->mode_pages.index[i].page_code &
-			       SMPH_PC_MASK,
-			       lun->mode_pages.index[i].page_len);
+			       page_index->page_code & SMPH_PC_MASK,
+			       page_index->page_len);
 #endif
 
-			page_len += lun->mode_pages.index[i].page_len;
+			page_len += page_index->page_len;
 		}
 
 		if (page_len == 0) {
@@ -6473,9 +6511,14 @@ ctl_mode_sense(struct ctl_scsiio *ctsio)
 			struct ctl_page_index *page_index;
 
 			page_index = &lun->mode_pages.index[i];
-
-			if (lun->be_lun->lun_type != T_DIRECT &&
-			    (page_index->page_flags & CTL_PAGE_FLAG_DISK_ONLY))
+			if (lun->be_lun->lun_type == T_DIRECT &&
+			    (page_index->page_flags & CTL_PAGE_FLAG_DIRECT) == 0)
+				continue;
+			if (lun->be_lun->lun_type == T_PROCESSOR &&
+			    (page_index->page_flags & CTL_PAGE_FLAG_PROC) == 0)
+				continue;
+			if (lun->be_lun->lun_type == T_CDROM &&
+			    (page_index->page_flags & CTL_PAGE_FLAG_CDROM) == 0)
 				continue;
 
 			/*
@@ -6523,8 +6566,14 @@ ctl_mode_sense(struct ctl_scsiio *ctsio)
 				continue;
 
 			/* Make sure the page is supported for this dev type */
-			if (lun->be_lun->lun_type != T_DIRECT &&
-			    (page_index->page_flags & CTL_PAGE_FLAG_DISK_ONLY))
+			if (lun->be_lun->lun_type == T_DIRECT &&
+			    (page_index->page_flags & CTL_PAGE_FLAG_DIRECT) == 0)
+				continue;
+			if (lun->be_lun->lun_type == T_PROCESSOR &&
+			    (page_index->page_flags & CTL_PAGE_FLAG_PROC) == 0)
+				continue;
+			if (lun->be_lun->lun_type == T_CDROM &&
+			    (page_index->page_flags & CTL_PAGE_FLAG_CDROM) == 0)
 				continue;
 
 			/*
@@ -10050,6 +10099,8 @@ ctl_inquiry_std(struct ctl_scsiio *ctsio)
 			inq_ptr->device = (SID_QUAL_LU_OFFLINE << 5) |
 			    lun->be_lun->lun_type;
 		}
+		if (lun->flags & CTL_LUN_REMOVABLE)
+			inq_ptr->dev_qual2 |= SID_RMB;
 	} else
 		inq_ptr->device = (SID_QUAL_BAD_LU << 5) | T_NODEVICE;
 
@@ -10114,6 +10165,10 @@ ctl_inquiry_std(struct ctl_scsiio *ctsio)
 			strncpy(inq_ptr->product, CTL_PROCESSOR_PRODUCT,
 			    sizeof(inq_ptr->product));
 			break;
+		case T_CDROM:
+			strncpy(inq_ptr->product, CTL_CDROM_PRODUCT,
+			    sizeof(inq_ptr->product));
+			break;
 		default:
 			strncpy(inq_ptr->product, CTL_UNKNOWN_PRODUCT,
 			    sizeof(inq_ptr->product));
@@ -10176,6 +10231,11 @@ ctl_inquiry_std(struct ctl_scsiio *ctsio)
 			scsi_ulto2b(0x0600, inq_ptr->version4);
 			break;
 		case T_PROCESSOR:
+			break;
+		case T_CDROM:
+			/* MMC-6 (no version claimed) */
+			scsi_ulto2b(0x04E0, inq_ptr->version4);
+			break;
 		default:
 			break;
 		}
@@ -10213,6 +10273,398 @@ ctl_inquiry(struct ctl_scsiio *ctsio)
 	}
 
 	return (retval);
+}
+
+int
+ctl_get_config(struct ctl_scsiio *ctsio)
+{
+	struct scsi_get_config_header *hdr;
+	struct scsi_get_config_feature *feature;
+	struct scsi_get_config *cdb;
+	struct ctl_lun *lun;
+	uint32_t alloc_len, data_len;
+	int rt, starting;
+
+	lun = ctsio->io_hdr.ctl_private[CTL_PRIV_LUN].ptr;
+	cdb = (struct scsi_get_config *)ctsio->cdb;
+	rt = (cdb->rt & SGC_RT_MASK);
+	starting = scsi_2btoul(cdb->starting_feature);
+	alloc_len = scsi_2btoul(cdb->length);
+
+	data_len = sizeof(struct scsi_get_config_header) +
+	    sizeof(struct scsi_get_config_feature) + 8 +
+	    sizeof(struct scsi_get_config_feature) + 8 +
+	    sizeof(struct scsi_get_config_feature) + 4 +
+	    sizeof(struct scsi_get_config_feature) + 4 +
+	    sizeof(struct scsi_get_config_feature) + 8 +
+	    sizeof(struct scsi_get_config_feature) +
+	    sizeof(struct scsi_get_config_feature) + 4 +
+	    sizeof(struct scsi_get_config_feature) + 4 +
+	    sizeof(struct scsi_get_config_feature) + 4 +
+	    sizeof(struct scsi_get_config_feature) + 4 +
+	    sizeof(struct scsi_get_config_feature) + 4 +
+	    sizeof(struct scsi_get_config_feature) + 4;
+	ctsio->kern_data_ptr = malloc(data_len, M_CTL, M_WAITOK | M_ZERO);
+	ctsio->kern_sg_entries = 0;
+	ctsio->kern_data_resid = 0;
+	ctsio->kern_rel_offset = 0;
+
+	hdr = (struct scsi_get_config_header *)ctsio->kern_data_ptr;
+	if (lun->flags & CTL_LUN_NO_MEDIA)
+		scsi_ulto2b(0x0000, hdr->current_profile);
+	else
+		scsi_ulto2b(0x0010, hdr->current_profile);
+	feature = (struct scsi_get_config_feature *)(hdr + 1);
+
+	if (starting > 0x003b)
+		goto done;
+	if (starting > 0x003a)
+		goto f3b;
+	if (starting > 0x002b)
+		goto f3a;
+	if (starting > 0x002a)
+		goto f2b;
+	if (starting > 0x001f)
+		goto f2a;
+	if (starting > 0x001e)
+		goto f1f;
+	if (starting > 0x001d)
+		goto f1e;
+	if (starting > 0x0010)
+		goto f1d;
+	if (starting > 0x0003)
+		goto f10;
+	if (starting > 0x0002)
+		goto f3;
+	if (starting > 0x0001)
+		goto f2;
+	if (starting > 0x0000)
+		goto f1;
+
+	/* Profile List */
+	scsi_ulto2b(0x0000, feature->feature_code);
+	feature->flags = SGC_F_PERSISTENT | SGC_F_CURRENT;
+	feature->add_length = 8;
+	scsi_ulto2b(0x0008, &feature->feature_data[0]);	/* CD-ROM */
+	feature->feature_data[2] = 0x00;
+	scsi_ulto2b(0x0010, &feature->feature_data[4]);	/* DVD-ROM */
+	feature->feature_data[6] = 0x01;
+	feature = (struct scsi_get_config_feature *)
+	    &feature->feature_data[feature->add_length];
+
+f1:	/* Core */
+	scsi_ulto2b(0x0001, feature->feature_code);
+	feature->flags = 0x08 | SGC_F_PERSISTENT | SGC_F_CURRENT;
+	feature->add_length = 8;
+	scsi_ulto4b(0x00000000, &feature->feature_data[0]);
+	feature->feature_data[4] = 0x03;
+	feature = (struct scsi_get_config_feature *)
+	    &feature->feature_data[feature->add_length];
+
+f2:	/* Morphing */
+	scsi_ulto2b(0x0002, feature->feature_code);
+	feature->flags = 0x04 | SGC_F_PERSISTENT | SGC_F_CURRENT;
+	feature->add_length = 4;
+	feature->feature_data[0] = 0x02;
+	feature = (struct scsi_get_config_feature *)
+	    &feature->feature_data[feature->add_length];
+
+f3:	/* Removable Medium */
+	scsi_ulto2b(0x0003, feature->feature_code);
+	feature->flags = 0x04 | SGC_F_PERSISTENT | SGC_F_CURRENT;
+	feature->add_length = 4;
+	feature->feature_data[0] = 0x39;
+	feature = (struct scsi_get_config_feature *)
+	    &feature->feature_data[feature->add_length];
+
+	if (rt == SGC_RT_CURRENT && (lun->flags & CTL_LUN_NO_MEDIA))
+		goto done;
+
+f10:	/* Random Read */
+	scsi_ulto2b(0x0010, feature->feature_code);
+	feature->flags = 0x00;
+	if ((lun->flags & CTL_LUN_NO_MEDIA) == 0)
+		feature->flags |= SGC_F_CURRENT;
+	feature->add_length = 8;
+	scsi_ulto4b(lun->be_lun->blocksize, &feature->feature_data[0]);
+	scsi_ulto2b(1, &feature->feature_data[4]);
+	feature->feature_data[6] = 0x00;
+	feature = (struct scsi_get_config_feature *)
+	    &feature->feature_data[feature->add_length];
+
+f1d:	/* Multi-Read */
+	scsi_ulto2b(0x001D, feature->feature_code);
+	feature->flags = 0x00;
+	if ((lun->flags & CTL_LUN_NO_MEDIA) == 0)
+		feature->flags |= SGC_F_CURRENT;
+	feature->add_length = 0;
+	feature = (struct scsi_get_config_feature *)
+	    &feature->feature_data[feature->add_length];
+
+f1e:	/* CD Read */
+	scsi_ulto2b(0x001E, feature->feature_code);
+	feature->flags = 0x00;
+	if ((lun->flags & CTL_LUN_NO_MEDIA) == 0)
+		feature->flags |= SGC_F_CURRENT;
+	feature->add_length = 4;
+	feature->feature_data[0] = 0x00;
+	feature = (struct scsi_get_config_feature *)
+	    &feature->feature_data[feature->add_length];
+
+f1f:	/* DVD Read */
+	scsi_ulto2b(0x001F, feature->feature_code);
+	feature->flags = 0x08;
+	if ((lun->flags & CTL_LUN_NO_MEDIA) == 0)
+		feature->flags |= SGC_F_CURRENT;
+	feature->add_length = 4;
+	feature->feature_data[0] = 0x01;
+	feature->feature_data[2] = 0x03;
+	feature = (struct scsi_get_config_feature *)
+	    &feature->feature_data[feature->add_length];
+
+f2a:	/* DVD+RW */
+	scsi_ulto2b(0x002A, feature->feature_code);
+	feature->flags = 0x04;
+	if ((lun->flags & CTL_LUN_NO_MEDIA) == 0)
+		feature->flags |= SGC_F_CURRENT;
+	feature->add_length = 4;
+	feature->feature_data[0] = 0x00;
+	feature->feature_data[1] = 0x00;
+	feature = (struct scsi_get_config_feature *)
+	    &feature->feature_data[feature->add_length];
+
+f2b:	/* DVD+R */
+	scsi_ulto2b(0x002B, feature->feature_code);
+	feature->flags = 0x00;
+	if ((lun->flags & CTL_LUN_NO_MEDIA) == 0)
+		feature->flags |= SGC_F_CURRENT;
+	feature->add_length = 4;
+	feature->feature_data[0] = 0x00;
+	feature = (struct scsi_get_config_feature *)
+	    &feature->feature_data[feature->add_length];
+
+f3a:	/* DVD+RW Dual Layer */
+	scsi_ulto2b(0x003A, feature->feature_code);
+	feature->flags = 0x00;
+	if ((lun->flags & CTL_LUN_NO_MEDIA) == 0)
+		feature->flags |= SGC_F_CURRENT;
+	feature->add_length = 4;
+	feature->feature_data[0] = 0x00;
+	feature->feature_data[1] = 0x00;
+	feature = (struct scsi_get_config_feature *)
+	    &feature->feature_data[feature->add_length];
+
+f3b:	/* DVD+R Dual Layer */
+	scsi_ulto2b(0x003B, feature->feature_code);
+	feature->flags = 0x00;
+	if ((lun->flags & CTL_LUN_NO_MEDIA) == 0)
+		feature->flags |= SGC_F_CURRENT;
+	feature->add_length = 4;
+	feature->feature_data[0] = 0x00;
+	feature = (struct scsi_get_config_feature *)
+	    &feature->feature_data[feature->add_length];
+
+done:
+	data_len = (uint8_t *)feature - (uint8_t *)hdr;
+	if (rt == SGC_RT_SPECIFIC && data_len > 4) {
+		feature = (struct scsi_get_config_feature *)(hdr + 1);
+		if (scsi_2btoul(feature->feature_code) == starting)
+			feature = (struct scsi_get_config_feature *)
+			    &feature->feature_data[feature->add_length];
+		data_len = (uint8_t *)feature - (uint8_t *)hdr;
+	}
+	scsi_ulto4b(data_len - 4, hdr->data_length);
+	if (data_len < alloc_len) {
+		ctsio->residual = alloc_len - data_len;
+		ctsio->kern_data_len = data_len;
+		ctsio->kern_total_len = data_len;
+	} else {
+		ctsio->residual = 0;
+		ctsio->kern_data_len = alloc_len;
+		ctsio->kern_total_len = alloc_len;
+	}
+
+	ctl_set_success(ctsio);
+	ctsio->io_hdr.flags |= CTL_FLAG_ALLOCATED;
+	ctsio->be_move_done = ctl_config_move_done;
+	ctl_datamove((union ctl_io *)ctsio);
+	return (CTL_RETVAL_COMPLETE);
+}
+
+int
+ctl_get_event_status(struct ctl_scsiio *ctsio)
+{
+	struct scsi_get_event_status_header *hdr;
+	struct scsi_get_event_status *cdb;
+	struct ctl_lun *lun;
+	uint32_t alloc_len, data_len;
+	int notif_class;
+
+	lun = ctsio->io_hdr.ctl_private[CTL_PRIV_LUN].ptr;
+	cdb = (struct scsi_get_event_status *)ctsio->cdb;
+	if ((cdb->byte2 & SGESN_POLLED) == 0) {
+		ctl_set_invalid_field(ctsio, /*sks_valid*/ 1, /*command*/ 1,
+		    /*field*/ 1, /*bit_valid*/ 1, /*bit*/ 0);
+		ctl_done((union ctl_io *)ctsio);
+		return (CTL_RETVAL_COMPLETE);
+	}
+	notif_class = cdb->notif_class;
+	alloc_len = scsi_2btoul(cdb->length);
+
+	data_len = sizeof(struct scsi_get_event_status_header);
+	ctsio->kern_data_ptr = malloc(data_len, M_CTL, M_WAITOK | M_ZERO);
+	ctsio->kern_sg_entries = 0;
+	ctsio->kern_data_resid = 0;
+	ctsio->kern_rel_offset = 0;
+
+	if (data_len < alloc_len) {
+		ctsio->residual = alloc_len - data_len;
+		ctsio->kern_data_len = data_len;
+		ctsio->kern_total_len = data_len;
+	} else {
+		ctsio->residual = 0;
+		ctsio->kern_data_len = alloc_len;
+		ctsio->kern_total_len = alloc_len;
+	}
+
+	hdr = (struct scsi_get_event_status_header *)ctsio->kern_data_ptr;
+	scsi_ulto2b(0, hdr->descr_length);
+	hdr->nea_class = SGESN_NEA;
+	hdr->supported_class = 0;
+
+	ctl_set_success(ctsio);
+	ctsio->io_hdr.flags |= CTL_FLAG_ALLOCATED;
+	ctsio->be_move_done = ctl_config_move_done;
+	ctl_datamove((union ctl_io *)ctsio);
+	return (CTL_RETVAL_COMPLETE);
+}
+
+int
+ctl_mechanism_status(struct ctl_scsiio *ctsio)
+{
+	struct scsi_mechanism_status_header *hdr;
+	struct scsi_mechanism_status *cdb;
+	struct ctl_lun *lun;
+	uint32_t alloc_len, data_len;
+
+	lun = ctsio->io_hdr.ctl_private[CTL_PRIV_LUN].ptr;
+	cdb = (struct scsi_mechanism_status *)ctsio->cdb;
+	alloc_len = scsi_2btoul(cdb->length);
+
+	data_len = sizeof(struct scsi_mechanism_status_header);
+	ctsio->kern_data_ptr = malloc(data_len, M_CTL, M_WAITOK | M_ZERO);
+	ctsio->kern_sg_entries = 0;
+	ctsio->kern_data_resid = 0;
+	ctsio->kern_rel_offset = 0;
+
+	if (data_len < alloc_len) {
+		ctsio->residual = alloc_len - data_len;
+		ctsio->kern_data_len = data_len;
+		ctsio->kern_total_len = data_len;
+	} else {
+		ctsio->residual = 0;
+		ctsio->kern_data_len = alloc_len;
+		ctsio->kern_total_len = alloc_len;
+	}
+
+	hdr = (struct scsi_mechanism_status_header *)ctsio->kern_data_ptr;
+	hdr->state1 = 0x00;
+	hdr->state2 = 0xe0;
+	scsi_ulto3b(0, hdr->lba);
+	hdr->slots_num = 0;
+	scsi_ulto2b(0, hdr->slots_length);
+
+	ctl_set_success(ctsio);
+	ctsio->io_hdr.flags |= CTL_FLAG_ALLOCATED;
+	ctsio->be_move_done = ctl_config_move_done;
+	ctl_datamove((union ctl_io *)ctsio);
+	return (CTL_RETVAL_COMPLETE);
+}
+
+static void
+ctl_ultomsf(uint32_t lba, uint8_t *buf)
+{
+
+	lba += 150;
+	buf[0] = 0;
+	buf[1] = bin2bcd((lba / 75) / 60);
+	buf[2] = bin2bcd((lba / 75) % 60);
+	buf[3] = bin2bcd(lba % 75);
+}
+
+int
+ctl_read_toc(struct ctl_scsiio *ctsio)
+{
+	struct scsi_read_toc_hdr *hdr;
+	struct scsi_read_toc_type01_descr *descr;
+	struct scsi_read_toc *cdb;
+	struct ctl_lun *lun;
+	uint32_t alloc_len, data_len;
+	int format, msf;
+
+	lun = ctsio->io_hdr.ctl_private[CTL_PRIV_LUN].ptr;
+	cdb = (struct scsi_read_toc *)ctsio->cdb;
+	msf = (cdb->byte2 & CD_MSF) != 0;
+	format = cdb->format;
+	alloc_len = scsi_2btoul(cdb->data_len);
+
+	data_len = sizeof(struct scsi_read_toc_hdr);
+	if (format == 0)
+		data_len += 2 * sizeof(struct scsi_read_toc_type01_descr);
+	else
+		data_len += sizeof(struct scsi_read_toc_type01_descr);
+	ctsio->kern_data_ptr = malloc(data_len, M_CTL, M_WAITOK | M_ZERO);
+	ctsio->kern_sg_entries = 0;
+	ctsio->kern_data_resid = 0;
+	ctsio->kern_rel_offset = 0;
+
+	if (data_len < alloc_len) {
+		ctsio->residual = alloc_len - data_len;
+		ctsio->kern_data_len = data_len;
+		ctsio->kern_total_len = data_len;
+	} else {
+		ctsio->residual = 0;
+		ctsio->kern_data_len = alloc_len;
+		ctsio->kern_total_len = alloc_len;
+	}
+
+	hdr = (struct scsi_read_toc_hdr *)ctsio->kern_data_ptr;
+	if (format == 0) {
+		scsi_ulto2b(0x12, hdr->data_length);
+		hdr->first = 1;
+		hdr->last = 1;
+		descr = (struct scsi_read_toc_type01_descr *)(hdr + 1);
+		descr->addr_ctl = 0x14;
+		descr->track_number = 1;
+		if (msf)
+			ctl_ultomsf(0, descr->track_start);
+		else
+			scsi_ulto4b(0, descr->track_start);
+		descr++;
+		descr->addr_ctl = 0x14;
+		descr->track_number = 0xaa;
+		if (msf)
+			ctl_ultomsf(lun->be_lun->maxlba+1, descr->track_start);
+		else
+			scsi_ulto4b(lun->be_lun->maxlba+1, descr->track_start);
+	} else {
+		scsi_ulto2b(0x0a, hdr->data_length);
+		hdr->first = 1;
+		hdr->last = 1;
+		descr = (struct scsi_read_toc_type01_descr *)(hdr + 1);
+		descr->addr_ctl = 0x14;
+		descr->track_number = 1;
+		if (msf)
+			ctl_ultomsf(0, descr->track_start);
+		else
+			scsi_ulto4b(0, descr->track_start);
+	}
+
+	ctl_set_success(ctsio);
+	ctsio->io_hdr.flags |= CTL_FLAG_ALLOCATED;
+	ctsio->be_move_done = ctl_config_move_done;
+	ctl_datamove((union ctl_io *)ctsio);
+	return (CTL_RETVAL_COMPLETE);
 }
 
 /*
@@ -10858,25 +11310,18 @@ ctl_scsiio_lun_check(struct ctl_lun *lun,
 		}
 	}
 
-	if ((lun->flags & CTL_LUN_OFFLINE)
-	 && ((entry->flags & CTL_CMD_FLAG_OK_ON_STANDBY) == 0)) {
-		ctl_set_lun_not_ready(ctsio);
-		retval = 1;
-		goto bailout;
-	}
-
-	if ((lun->flags & CTL_LUN_STOPPED)
-	 && ((entry->flags & CTL_CMD_FLAG_OK_ON_STOPPED) == 0)) {
-		/* "Logical unit not ready, initializing cmd. required" */
-		ctl_set_lun_stopped(ctsio);
-		retval = 1;
-		goto bailout;
-	}
-
-	if ((lun->flags & CTL_LUN_INOPERABLE)
-	 && ((entry->flags & CTL_CMD_FLAG_OK_ON_INOPERABLE) == 0)) {
-		/* "Medium format corrupted" */
-		ctl_set_medium_format_corrupted(ctsio);
+	if ((entry->flags & CTL_CMD_FLAG_OK_ON_NO_MEDIA) == 0) {
+		if (lun->flags & CTL_LUN_EJECTED)
+			ctl_set_lun_ejected(ctsio);
+		else if (lun->flags & CTL_LUN_NO_MEDIA) {
+			if (lun->flags & CTL_LUN_REMOVABLE)
+				ctl_set_lun_no_media(ctsio);
+			else
+				ctl_set_lun_int_reqd(ctsio);
+		} else if (lun->flags & CTL_LUN_STOPPED)
+			ctl_set_lun_stopped(ctsio);
+		else
+			goto bailout;
 		retval = 1;
 		goto bailout;
 	}
@@ -11264,12 +11709,16 @@ ctl_cmd_applicable(uint8_t lun_type, const struct ctl_cmd_entry *entry)
 {
 
 	switch (lun_type) {
+	case T_DIRECT:
+		if ((entry->flags & CTL_CMD_FLAG_OK_ON_DIRECT) == 0)
+			return (0);
+		break;
 	case T_PROCESSOR:
 		if ((entry->flags & CTL_CMD_FLAG_OK_ON_PROC) == 0)
 			return (0);
 		break;
-	case T_DIRECT:
-		if ((entry->flags & CTL_CMD_FLAG_OK_ON_SLUN) == 0)
+	case T_CDROM:
+		if ((entry->flags & CTL_CMD_FLAG_OK_ON_CDROM) == 0)
 			return (0);
 		break;
 	default:
@@ -11384,9 +11833,7 @@ ctl_do_lun_reset(struct ctl_lun *lun, union ctl_io *io, ctl_ua_type ua_type)
 #if 0
 	uint32_t initidx;
 #endif
-#ifdef CTL_WITH_CA
 	int i;
-#endif
 
 	mtx_lock(&lun->lun_lock);
 	/*
@@ -11421,6 +11868,9 @@ ctl_do_lun_reset(struct ctl_lun *lun, union ctl_io *io, ctl_ua_type ua_type)
 	for (i = 0; i < CTL_MAX_INITIATORS; i++)
 		ctl_clear_mask(lun->have_ca, i);
 #endif
+	lun->prevent_count = 0;
+	for (i = 0; i < CTL_MAX_INITIATORS; i++)
+		ctl_clear_mask(lun->prevent, i);
 	mtx_unlock(&lun->lun_lock);
 
 	return (0);
@@ -11566,6 +12016,10 @@ ctl_i_t_nexus_reset(union ctl_io *io)
 #endif
 		if ((lun->flags & CTL_LUN_RESERVED) && (lun->res_idx == initidx))
 			lun->flags &= ~CTL_LUN_RESERVED;
+		if (ctl_is_set(lun->prevent, initidx)) {
+			ctl_clear_mask(lun->prevent, initidx);
+			lun->prevent_count--;
+		}
 		ctl_est_ua(lun, initidx, CTL_UA_I_T_NEXUS_LOSS);
 		mtx_unlock(&lun->lun_lock);
 	}
@@ -13077,7 +13531,7 @@ ctl_thresh_thread(void *arg)
 		mtx_lock(&softc->ctl_lock);
 		STAILQ_FOREACH(lun, &softc->lun_list, links) {
 			if ((lun->flags & CTL_LUN_DISABLED) ||
-			    (lun->flags & CTL_LUN_OFFLINE) ||
+			    (lun->flags & CTL_LUN_NO_MEDIA) ||
 			    lun->backend->lun_attr == NULL)
 				continue;
 			if ((lun->flags & CTL_LUN_PRIMARY_SC) == 0 &&
