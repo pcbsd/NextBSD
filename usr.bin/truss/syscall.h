@@ -10,6 +10,7 @@
  * BinString -- pointer to an array of chars, printed via strvisx().
  * Ptr -- pointer to some unspecified structure.  Just print as hex for now.
  * Stat -- a pointer to a stat buffer.  Prints a couple fields.
+ * StatFs -- a pointer to a statfs buffer.  Prints a few fields.
  * Ioctl -- an ioctl command.  Woefully limited.
  * Quad -- a double-word value.  e.g., lseek(int, offset_t, int)
  * Signal -- a signal number.  Prints the signal name (SIGxxx)
@@ -38,11 +39,11 @@
 enum Argtype { None = 1, Hex, Octal, Int, LongHex, Name, Ptr, Stat, Ioctl, Quad,
 	Signal, Sockaddr, StringArray, Timespec, Timeval, Itimerval, Pollfd,
 	Fd_set, Sigaction, Fcntl, Mprot, Mmapflags, Whence, Readlinkres,
-	Sigset, Sigprocmask, Kevent, Sockdomain, Socktype, Open,
+	Sigset, Sigprocmask, StatFs, Kevent, Sockdomain, Socktype, Open,
 	Fcntlflag, Rusage, BinString, Shutdown, Resource, Rlimit, Timeval2,
 	Pathconf, Rforkflags, ExitStatus, Waitoptions, Idtype, Procctl,
 	LinuxSockArgs, Umtxop, Atfd, Atflags, Timespec2, Accessmode, Long,
-	Sysarch, ExecArgs, ExecEnv };
+	Sysarch, ExecArgs, ExecEnv, PipeFds, QuadHex };
 
 #define	ARG_MASK	0xff
 #define	OUT	0x100
@@ -55,8 +56,8 @@ struct syscall_args {
 
 struct syscall {
 	const char *name;
-	int ret_type;	/* 0, 1, or 2 return values */
-	int nargs;	/* actual number of meaningful arguments */
+	u_int ret_type;	/* 0, 1, or 2 return values */
+	u_int nargs;	/* actual number of meaningful arguments */
 			/* Hopefully, no syscalls with > 10 args */
 	struct syscall_args args[10];
 	struct timespec time; /* Time spent for this call */
@@ -65,7 +66,7 @@ struct syscall {
 };
 
 struct syscall *get_syscall(const char*);
-char *print_arg(struct syscall_args *, unsigned long*, long, struct trussinfo *);
+char *print_arg(struct syscall_args *, unsigned long*, long *, struct trussinfo *);
 
 /*
  * Linux Socket defines
@@ -109,5 +110,5 @@ struct linux_socketcall_args {
 
 void print_syscall(struct trussinfo *, const char *, int, char **);
 void print_syscall_ret(struct trussinfo *, const char *, int, char **, int,
-    long, struct syscall *);
+    long *, struct syscall *);
 void print_summary(struct trussinfo *trussinfo);
