@@ -83,7 +83,7 @@
 #endif // USE_OBJC
 
 #ifdef HAVE_PTHREAD_WORKQUEUES
-#include <pthread_workequeue.h>
+#include <pthread_workqueue.h>
 #endif
 
 #include <dispatch/dispatch.h>
