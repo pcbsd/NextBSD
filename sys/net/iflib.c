@@ -2891,6 +2891,8 @@ iflib_device_register(device_t dev, void *sc, if_shared_ctx_t sctx, if_ctx_t *ct
 	} else if (scctx->isc_msix_bar != 0)
 		msix = iflib_msix_init(ctx);
 	else {
+		scctx->isc_vectors = 1;
+		scctx->isc_nqsets = 1;
 		scctx->isc_intr = IFLIB_INTR_LEGACY;
 		msix = 0;
 	}
