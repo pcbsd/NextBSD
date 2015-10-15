@@ -333,6 +333,7 @@ MTREES+=	mtree/BSD.groff.dist		/usr
 .endif
 .if ${MK_TESTS} != "no"
 MTREES+=	mtree/BSD.tests.dist		${TESTSBASE}
+MTREES+=	mtree/BSD.tests.dist		/usr/lib/debug/${TESTSBASE}
 .endif
 .for mtree in ${LOCAL_MTREE}
 MTREES+=	../${mtree}			/
