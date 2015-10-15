@@ -25,13 +25,19 @@
 # 		This is a variant of install, which will
 # 		put the stuff into the right "distribution".
 #
-#	afterinstall, all, all-man, beforeinstall, checkdpadd, clean,
-#	cleandepend, cleandir, cleanilinks depend, install, lint,
-#	maninstall, manlint, obj, objlink, realinstall, regress, tags
+# 	See ALL_SUBDIR_TARGETS for list of targets that will recurse.
+# 	Custom targets can be added to SUBDIR_TARGETS in src.conf.
 #
 
 .if !target(__<bsd.subdir.mk>__)
 __<bsd.subdir.mk>__:
+
+ALL_SUBDIR_TARGETS= all all-man buildconfig buildfiles buildincludes \
+		    checkdpadd clean cleandepend cleandir cleanilinks \
+		    cleanobj config depend distribute files includes \
+		    installconfig installfiles installincludes lint \
+		    maninstall manlint obj objlink realinstall regress tags \
+		    ${SUBDIR_TARGETS}
 
 .include <bsd.init.mk>
 
@@ -85,9 +91,7 @@ ${SUBDIR:N.WAIT}: .PHONY .MAKE
 
 # Work around parsing of .if nested in .for by putting .WAIT string into a var.
 __wait= .WAIT
-.for __target in all all-man checkdpadd clean cleandepend cleandir \
-    cleanilinks depend distribute lint maninstall manlint obj objlink \
-    realinstall regress tags ${SUBDIR_TARGETS}
+.for __target in ${ALL_SUBDIR_TARGETS}
 .ifdef SUBDIR_PARALLEL
 __subdir_targets=
 .for __dir in ${SUBDIR}
@@ -119,20 +123,6 @@ ${__target}: ${__subdir_targets}
 .else
 ${__target}: _sub.${__target}
 _sub.${__target}: _SUBDIR
-.endif
-.endfor
-
-.for __target in files includes config
-.for __stage in build install
-${__stage}${__target}:
-.if make(${__stage}${__target})
-${__stage}${__target}: _sub.${__stage}${__target}
-_sub.${__stage}${__target}: _SUBDIR
-.endif
-.endfor
-.if !target(${__target})
-${__target}: .MAKE
-	${_+_}cd ${.CURDIR}; ${MAKE} build${__target}; ${MAKE} install${__target}
 .endif
 .endfor
 

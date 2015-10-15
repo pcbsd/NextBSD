@@ -32,6 +32,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/systm.h>
 #include <sys/bus.h>
 #include <sys/ktr.h>
+#include <sys/limits.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/module.h>
@@ -249,9 +250,8 @@ static int ntb_process_tx(struct ntb_transport_qp *qp,
 static void ntb_tx_copy_task(struct ntb_transport_qp *qp,
     struct ntb_queue_entry *entry, void *offset);
 static void ntb_qp_full(void *arg);
-static void ntb_transport_rxc_db(void *data, int db_num);
+static int ntb_transport_rxc_db(void *arg, int dummy);
 static void ntb_rx_pendq_full(void *arg);
-static void ntb_transport_rx(struct ntb_transport_qp *qp);
 static int ntb_process_rxc(struct ntb_transport_qp *qp);
 static void ntb_rx_copy_task(struct ntb_transport_qp *qp,
     struct ntb_queue_entry *entry, void *offset);
@@ -519,7 +519,7 @@ ntb_transport_free(void *transport)
 	struct ntb_softc *ntb = nt->ntb;
 	int i;
 
-	nt->transport_link = NTB_LINK_DOWN;
+	ntb_transport_link_cleanup(nt);
 
 	callout_drain(&nt->link_work);
 
@@ -715,7 +715,7 @@ ntb_transport_link_up(struct ntb_transport_qp *qp)
  * @len: length of the data buffer
  *
  * Enqueue a new transmit buffer onto the transport queue from which a NTB
- * payload will be transmitted.  This assumes that a lock is behing held to
+ * payload will be transmitted.  This assumes that a lock is being held to
  * serialize access to the qp.
  *
  * RETURNS: An appropriate ERRNO error value on error, or zero for success.
@@ -809,7 +809,7 @@ ntb_tx_copy_task(struct ntb_transport_qp *qp, struct ntb_queue_entry *entry,
 	/* TODO: replace with bus_space_write */
 	hdr->flags = entry->flags | IF_NTB_DESC_DONE_FLAG;
 
-	ntb_ring_sdb(qp->ntb, qp->qp_num);
+	ntb_ring_doorbell(qp->ntb, qp->qp_num);
 
 	/* 
 	 * The entry length can only be zero if the packet is intended to be a
@@ -840,24 +840,17 @@ ntb_qp_full(void *arg)
 
 /* Transport Rx */
 static void
-ntb_transport_rxc_db(void *data, int db_num)
-{
-	struct ntb_transport_qp *qp = data;
-
-	ntb_transport_rx(qp);
-}
-
-static void
 ntb_rx_pendq_full(void *arg)
 {
 
 	CTR0(KTR_NTB, "RX: ntb_rx_pendq_full callout");
-	ntb_transport_rx(arg);
+	ntb_transport_rxc_db(arg, 0);
 }
 
-static void
-ntb_transport_rx(struct ntb_transport_qp *qp)
+static int
+ntb_transport_rxc_db(void *arg, int dummy __unused)
 {
+	struct ntb_transport_qp *qp = arg;
 	uint64_t i;
 	int rc;
 
@@ -867,7 +860,7 @@ ntb_transport_rx(struct ntb_transport_qp *qp)
 	 */
 	mtx_lock(&qp->transport->rx_lock);
 	CTR0(KTR_NTB, "RX: transport_rx");
-	for (i = 0; i < qp->rx_max_entry; i++) {
+	for (i = 0; i < MIN(qp->rx_max_entry, INT_MAX); i++) {
 		rc = ntb_process_rxc(qp);
 		if (rc != 0) {
 			CTR0(KTR_NTB, "RX: process_rxc failed");
@@ -875,6 +868,8 @@ ntb_transport_rx(struct ntb_transport_qp *qp)
 		}
 	}
 	mtx_unlock(&qp->transport->rx_lock);
+
+	return ((int)i);
 }
 
 static int
@@ -1047,7 +1042,7 @@ ntb_transport_link_work(void *arg)
 	/* send the local info, in the opposite order of the way we read it */
 	for (i = 0; i < num_mw; i++) {
 		rc = ntb_write_remote_spad(ntb, IF_NTB_MW0_SZ_HIGH + (i * 2),
-		    ntb_get_mw_size(ntb, i) >> 32);
+		    (uint64_t)ntb_get_mw_size(ntb, i) >> 32);
 		if (rc != 0)
 			goto out;
 
@@ -1257,15 +1252,15 @@ ntb_transport_link_cleanup(struct ntb_netdev *nt)
 {
 	int i;
 
-	if (nt->transport_link == NTB_LINK_DOWN)
-		callout_drain(&nt->link_work);
-	else
-		nt->transport_link = NTB_LINK_DOWN;
-
 	/* Pass along the info to any clients */
 	for (i = 0; i < nt->max_qps; i++)
 		if (!test_bit(i, &nt->qp_bitmap))
 			ntb_qp_link_down(&nt->qps[i]);
+
+	if (nt->transport_link == NTB_LINK_DOWN)
+		callout_drain(&nt->link_work);
+	else
+		nt->transport_link = NTB_LINK_DOWN;
 
 	/* 
 	 * The scratchpad registers keep the values if the remote side
@@ -1311,7 +1306,7 @@ ntb_qp_link_cleanup(struct ntb_transport_qp *qp)
  *
  * Notify NTB transport layer of client's desire to no longer receive data on
  * transport queue specified.  It is the client's responsibility to ensure all
- * entries on queue are purged or otherwise handled appropraitely.
+ * entries on queue are purged or otherwise handled appropriately.
  */
 static void
 ntb_transport_link_down(struct ntb_transport_qp *qp)
