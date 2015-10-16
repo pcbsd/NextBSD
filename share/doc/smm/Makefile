@@ -22,4 +22,6 @@ SUBDIR=	title \
 	12.timed \
 	18.net
 
+SUBDIR_PARALLEL=
+
 .include <bsd.subdir.mk>
