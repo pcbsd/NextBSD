@@ -531,7 +531,6 @@ struct adapter {
 	 *	Allocated at run time, an array of rings.
 	 */
 	struct tx_ring		*tx_rings;
-	u32			num_tx_desc;
 	u32			tx_process_limit;
 
 	/*
@@ -540,7 +539,6 @@ struct adapter {
 	 */
 	struct rx_ring		*rx_rings;
 	u64			active_queues;
-	u32			num_rx_desc;
 	u32			rx_process_limit;
 
 	/* Multicast array memory */
