@@ -340,7 +340,7 @@ struct thread {
 	struct threadlist *td_threadlist; /* (?) thread workq thread list. */
 	void            *td_reuse_stack;  /* (?) reuse workq thread stack.  */
 	void		*td_emuldata;	/* Emulator state data */
-	void	*td_machdata;	/* (k) mach state. */
+	void		*td_machdata;	/* (k) mach state. */
 	int		td_lastcpu;	/* (t) Last cpu we were on. */
 	int		td_oncpu;	/* (t) Which cpu we are on. */
 };
