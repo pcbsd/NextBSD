@@ -50,11 +50,14 @@
 .include <bsd.arch.inc.mk>
 .include <bsd.compiler.mk>
 
-# We must do lib/ and libexec/ before bin/, because if installworld
-# installs a new /bin/sh, the 'make' command will *immediately*
-# use that new version.  And the new (dynamically-linked) /bin/sh
-# will expect to find appropriate libraries in /lib and /libexec.
-#
+# We must do lib/ and libexec/ before bin/ in case of a mid-install error to
+# keep the users system reasonably usable.  For static->dynamic root upgrades,
+# we don't want to install a dynamic binary without rtld and the needed
+# libraries.  More commonly, for dynamic root, we don't want to install a
+# binary that requires a newer library version that hasn't been installed yet.
+# This ordering is not a guarantee though.  The only guarantee of a working
+# system here would require fine-grained ordering of all components based
+# on their dependencies.
 SRCDIR?=	${.CURDIR}
 .if defined(SUBDIR_OVERRIDE)
 SUBDIR=	${SUBDIR_OVERRIDE}
@@ -829,7 +832,7 @@ _zoneinfo=	zic tzsetup
 
 ITOOLS=	[ awk cap_mkdb cat chflags chmod chown cmp cp \
 	date echo egrep find grep id install ${_install-info} \
-	ln lockf make mkdir mtree mv pwd_mkdb \
+	ln make mkdir mtree mv pwd_mkdb \
 	rm sed services_mkdb sh strip sysctl test true uname wc ${_zoneinfo} \
 	${LOCAL_ITOOLS}
 
@@ -1072,7 +1075,7 @@ INSTALLKERNEL= ${_kernel}
 .endif
 .endfor
 
-buildkernel ${WMAKE_TGTS:N_worldtmp} ${.ALLTARGETS:M_*:N_worldtmp}: .MAKE .PHONY
+buildkernel ${WMAKE_TGTS:N_worldtmp:Nbuild32} ${.ALLTARGETS:M_*:N_worldtmp}: .MAKE .PHONY
 
 #
 # buildkernel
@@ -1503,7 +1506,7 @@ build-tools: .MAKE
 #
 # kernel-tools: Build kernel-building tools
 #
-kernel-tools: .MAKE
+kernel-tools:
 	mkdir -p ${MAKEOBJDIRPREFIX}/usr
 	mtree -deU -f ${.CURDIR}/etc/mtree/BSD.usr.dist \
 	    -p ${MAKEOBJDIRPREFIX}/usr >/dev/null
@@ -1604,7 +1607,7 @@ NXBMAKE=	${NXBENV} ${MAKE} \
 # For non-clang enabled targets that are still using the in tree gcc
 # we must build a gperf binary for one instance of its Makefiles.  On
 # clang-enabled systems, the gperf binary is obsolete.
-native-xtools: .MAKE
+native-xtools:
 .if ${MK_GCC_BOOTSTRAP} != "no"
 	mkdir -p ${OBJTREE}/gperf_for_gcc/usr/bin
 	${_+_}@${ECHODIR} "===> ${_gperf} (obj,depend,all,install)"; \
