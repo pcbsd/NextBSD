@@ -253,7 +253,6 @@ SUBDIR.${MK_RCMDS}+=	rlogin
 SUBDIR.${MK_RCMDS}+=	rsh
 SUBDIR.${MK_RCMDS}+=	ruptime
 SUBDIR.${MK_RCMDS}+=	rwho
-SUBDIR.${MK_SENDMAIL}+=	vacation
 SUBDIR.${MK_TALK}+=	talk
 SUBDIR.${MK_TELNET}+=	telnet
 .if ${MACHINE_CPUARCH} == "amd64"
