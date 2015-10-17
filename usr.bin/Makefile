@@ -255,12 +255,10 @@ SUBDIR.${MK_RCMDS}+=	ruptime
 SUBDIR.${MK_RCMDS}+=	rwho
 SUBDIR.${MK_TALK}+=	talk
 SUBDIR.${MK_TELNET}+=	telnet
-
 .if ${MACHINE_CPUARCH} == "amd64"
 #_xpc_tests=     xpc-tests
-_mach_tests=	mach-tests
+_mach_tests=    mach-tests
 .endif
-
 SUBDIR.${MK_TESTS}+=	tests
 SUBDIR.${MK_TEXTPROC}+=	checknr
 SUBDIR.${MK_TEXTPROC}+=	colcrt
@@ -274,10 +272,6 @@ SUBDIR.${MK_TOOLCHAIN}+=	ctags
 SUBDIR.${MK_TOOLCHAIN}+=	cxxfilt
 SUBDIR.${MK_TOOLCHAIN}+=	elfcopy
 SUBDIR.${MK_TOOLCHAIN}+=	file2c
-<<<<<<< HEAD
-
-=======
->>>>>>> 849afab924e709eab7940cffd90ea26dbdb7692c
 .if ${MACHINE_ARCH} != "aarch64" # ARM64TODO gprof does not build
 SUBDIR.${MK_TOOLCHAIN}+=	gprof
 .endif
