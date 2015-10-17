@@ -104,6 +104,9 @@ __FBSDID("$FreeBSD$");
 #include <netinet/tcp_var.h>
 #include <netinet6/tcp6_var.h>
 #include <netinet/tcpip.h>
+#ifdef TCPPCAP
+#include <netinet/tcp_pcap.h>
+#endif
 #include <netinet/tcp_syncache.h>
 #ifdef TCPDEBUG
 #include <netinet/tcp_debug.h>
@@ -1524,6 +1527,11 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	KASSERT(tp->t_state != TCPS_TIME_WAIT, ("%s: TCPS_TIME_WAIT",
 	    __func__));
 
+#ifdef TCPPCAP
+	/* Save segment, if requested. */
+	tcp_pcap_add(th, m, &(tp->t_inpkts));
+#endif
+
 	/*
 	 * Segment received on connection.
 	 * Reset idle time and keep-alive timer.
@@ -2536,6 +2544,16 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 						tp->snd_nxt = onxt;
 					goto drop;
 				} else if (V_tcp_do_rfc3042) {
+					/*
+					 * Process first and second duplicate
+					 * ACKs. Each indicates a segment
+					 * leaving the network, creating room
+					 * for more. Make sure we can send a
+					 * packet on reception of each duplicate
+					 * ACK by increasing snd_cwnd by one
+					 * segment. Restore the original
+					 * snd_cwnd after packet transmission.
+					 */
 					cc_ack_received(tp, th, CC_DUPACK);
 					u_long oldcwnd = tp->snd_cwnd;
 					tcp_seq oldsndmax = tp->snd_max;

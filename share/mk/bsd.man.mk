@@ -128,7 +128,7 @@ ZEXT=		${MCOMPRESS_EXT}
 
 .if defined(MAN) && !empty(MAN)
 .if ${MK_STAGING_MAN} == "yes"
-staging: stage_files
+STAGE_TARGETS+= stage_files
 _mansets:= ${MAN:E:O:u:M*[1-9]:@s@man$s@}
 STAGE_SETS+= ${_mansets}
 .for _page in ${MAN}
@@ -137,7 +137,7 @@ STAGE_DIR.man${_page:T:E}?= ${STAGE_OBJTOP}${MANDIR}${_page:T:E}${MANSUBDIR}
 .endfor
 .if !empty(MLINKS)
 STAGE_SETS+= mlinks
-staging: stage_links
+STAGE_TARGETS+= stage_links
 STAGE_LINKS.mlinks:= ${MLINKS:@f@${f:S,^,${MANDIR}${f:E}${MANSUBDIR}/,}@}
 stage_links.mlinks: ${_mansets:@s@stage_files.$s@}
 .endif
@@ -187,7 +187,7 @@ _maninstall: ${MAN}
 .endfor
 .else
 .for _page _sect in ${.ALLSRC:C/\.([^.]*)$/.\1 \1/}
-	@d=${DESTDIR}${MANDIR}${_sect}${MANSUBDIR}; \
+	@d=${DESTDIR}${MANDIR}${_sect}${MANSUBDIR}/; \
 	${ECHO} ${MINSTALL} ${_page} $${d}; \
 	${MINSTALL} $${page} $${d};
 .endfor
@@ -201,7 +201,7 @@ _maninstall: ${MAN}
 .else
 .for __page in ${MAN}
 	${MINSTALL} ${__page:T:S/$/${MCOMPRESS_EXT}/g} \
-		${DESTDIR}${MANDIR}${__page:E}${MANSUBDIR}
+		${DESTDIR}${MANDIR}${__page:E}${MANSUBDIR}/
 .if defined(MANBUILDCAT) && !empty(MANBUILDCAT)
 	${MINSTALL} ${__page:T:S/$/${CATEXT}${MCOMPRESS_EXT}/g} \
 		${DESTDIR}${CATDIR}${__page:E}${MANSUBDIR}/${__page:T:S/$/${MCOMPRESS_EXT}/}

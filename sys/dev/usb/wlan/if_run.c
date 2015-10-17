@@ -246,6 +246,7 @@ static const STRUCT_USB_HOST_ID run_devs[] = {
     RUN_DEV(MSI,		RT3070_9),
     RUN_DEV(MSI,		RT3070_10),
     RUN_DEV(MSI,		RT3070_11),
+    RUN_DEV(NETGEAR,		WNDA4100),
     RUN_DEV(OVISLINK,		RT3072),
     RUN_DEV(PARA,		RT3070),
     RUN_DEV(PEGATRON,		RT2870),
@@ -3706,7 +3707,6 @@ done:
 	if (error != 0) {
 		if(m != NULL)
 			m_freem(m);
-		ieee80211_free_node(ni);
 	}
 
 	return (error);
