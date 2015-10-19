@@ -63,6 +63,10 @@ SRCDIR?=	${.CURDIR}
 SUBDIR=	${SUBDIR_OVERRIDE}
 .else
 SUBDIR=	lib libexec
+.if make(install*)
+# Ensure libraries are installed before progressing.
+SUBDIR+=.WAIT
+.endif
 SUBDIR+=bin
 .if ${MK_CDDL} != "no"
 SUBDIR+=cddl
@@ -115,6 +119,9 @@ SUBDIR+=	${_DIR}
 # by calling 'makedb' in share/man.  This is only relevant for
 # install/distribute so they build the whatis file after every manpage is
 # installed.
+.if make(install*)
+SUBDIR+=.WAIT
+.endif
 SUBDIR+=etc
 
 .if defined(NOCLEAN)
@@ -141,14 +148,17 @@ OSRELDATE!=	awk '/^\#define[[:space:]]*__FreeBSD_version/ { print $$3 }' \
 .else
 OSRELDATE=	0
 .endif
+.export OSRELDATE
 .endif
 
+# Set VERSION for CTFMERGE to use via the default CTFFLAGS=-L VERSION.
 .if !defined(VERSION)
 REVISION!=	${MAKE} -C ${SRCDIR}/release -V REVISION
 BRANCH!=	${MAKE} -C ${SRCDIR}/release -V BRANCH
 SRCRELDATE!=	awk '/^\#define[[:space:]]*__FreeBSD_version/ { print $$3 }' \
 		${SRCDIR}/sys/sys/param.h
 VERSION=	FreeBSD ${REVISION}-${BRANCH:C/-p[0-9]+$//} ${TARGET_ARCH} ${SRCRELDATE}
+.export VERSION
 .endif
 
 KNOWN_ARCHES?=	aarch64/arm64 amd64 arm armeb/arm armv6/arm armv6hf/arm i386 i386/pc98 mips mipsel/mips mips64el/mips mips64/mips mipsn32el/mips mipsn32/mips powerpc powerpc64/powerpc sparc64
@@ -259,7 +269,6 @@ BMAKEENV=	INSTALL="sh ${.CURDIR}/tools/install.sh" \
 		MACHINE_INCLUDES="${WORLDTMP}/include" \
 		PATH=${BPATH}:${PATH} \
 		WORLDTMP=${WORLDTMP} \
-		VERSION="${VERSION}" \
 		MAKEFLAGS="-m ${.CURDIR}/tools/build/mk ${.MAKEFLAGS}"
 # need to keep this in sync with targets/pseudo/bootstrap-tools/Makefile
 BSARGS= 	DESTDIR= \
@@ -296,8 +305,7 @@ XMAKE=		TOOLS_PREFIX=${WORLDTMP} ${BMAKE} \
 # kernel-tools stage
 KTMAKEENV=	INSTALL="sh ${.CURDIR}/tools/install.sh" \
 		PATH=${BPATH}:${PATH} \
-		WORLDTMP=${WORLDTMP} \
-		VERSION="${VERSION}"
+		WORLDTMP=${WORLDTMP}
 KTMAKE=		TOOLS_PREFIX=${WORLDTMP} MAKEOBJDIRPREFIX=${WORLDTMP} \
 		${KTMAKEENV} ${MAKE} ${WORLD_FLAGS} -f Makefile.inc1 \
 		DESTDIR= \
@@ -310,7 +318,6 @@ KTMAKE=		TOOLS_PREFIX=${WORLDTMP} MAKEOBJDIRPREFIX=${WORLDTMP} \
 # world stage
 WMAKEENV=	${CROSSENV} \
 		_LDSCRIPTROOT= \
-		VERSION="${VERSION}" \
 		MACHINE_INCLUDES="${WORLDTMP}/include" \
 		INSTALL="sh ${.CURDIR}/tools/install.sh" \
 		PATH=${TMPPATH}
@@ -319,10 +326,6 @@ WMAKEENV=	${CROSSENV} \
 HMAKE=		PATH=${TMPPATH} ${MAKE} LOCAL_MTREE=${LOCAL_MTREE:Q}
 .if defined(NO_ROOT)
 HMAKE+=		PATH=${TMPPATH} METALOG=${METALOG} -DNO_ROOT
-.endif
-
-.if ${MK_CDDL} == "no"
-WMAKEENV+=	MK_CTF=no
 .endif
 
 .if defined(CROSS_TOOLCHAIN)
@@ -454,7 +457,6 @@ LIB32FLAGS+=		--sysroot=${WORLDTMP}
 # Yes, the flags are redundant.
 LIB32WMAKEENV+=	MAKEOBJDIRPREFIX=${LIB32_OBJTREE} \
 		_LDSCRIPTROOT=${LIB32TMP} \
-		VERSION="${VERSION}" \
 		INSTALL="sh ${.CURDIR}/tools/install.sh" \
 		PATH=${TMPPATH} \
 		LIBDIR=/usr/lib32 \
@@ -601,9 +603,9 @@ _cleanobj:
 	@echo "--------------------------------------------------------------"
 	@echo ">>> stage 2.1: cleaning up the object tree"
 	@echo "--------------------------------------------------------------"
-	${_+_}cd ${.CURDIR}; ${WMAKE} ${CLEANDIR:S/^/par-/}
+	${_+_}cd ${.CURDIR}; ${WMAKE} ${CLEANDIR}
 .if defined(LIB32TMP)
-	${_+_}cd ${.CURDIR}; ${LIB32WMAKE} -f Makefile.inc1 ${CLEANDIR:S/^/par-/}
+	${_+_}cd ${.CURDIR}; ${LIB32WMAKE} -f Makefile.inc1 ${CLEANDIR}
 .endif
 .endif
 _obj:
@@ -611,7 +613,7 @@ _obj:
 	@echo "--------------------------------------------------------------"
 	@echo ">>> stage 2.2: rebuilding the object tree"
 	@echo "--------------------------------------------------------------"
-	${_+_}cd ${.CURDIR}; ${WMAKE} par-obj
+	${_+_}cd ${.CURDIR}; ${WMAKE} obj
 _build-tools:
 	@echo
 	@echo "--------------------------------------------------------------"
@@ -630,7 +632,8 @@ _includes:
 	@echo "--------------------------------------------------------------"
 	@echo ">>> stage 4.1: building includes"
 	@echo "--------------------------------------------------------------"
-	${_+_}cd ${.CURDIR}; ${WMAKE} SHARED=symlinks par-includes
+	${_+_}cd ${.CURDIR}; ${WMAKE} SHARED=symlinks buildincludes
+	${_+_}cd ${.CURDIR}; ${WMAKE} SHARED=symlinks installincludes
 _libraries:
 	@echo
 	@echo "--------------------------------------------------------------"
@@ -644,7 +647,7 @@ _depend:
 	@echo "--------------------------------------------------------------"
 	@echo ">>> stage 4.3: make dependencies"
 	@echo "--------------------------------------------------------------"
-	${_+_}cd ${.CURDIR}; ${WMAKE} par-depend
+	${_+_}cd ${.CURDIR}; ${WMAKE} depend
 everything:
 	@echo
 	@echo "--------------------------------------------------------------"
@@ -754,7 +757,7 @@ buildworld_epilogue:
 # to quote multiword values.
 #
 buildenvvars:
-	@echo ${WMAKEENV:Q}
+	@echo ${WMAKEENV:Q} ${.MAKE.EXPORTED:@v@$v=\"${$v}\"@}
 
 .if ${.TARGETS:Mbuildenv}
 .if ${.MAKEFLAGS:M-j}
@@ -1590,7 +1593,6 @@ cross-tools: .MAKE
 
 NXBENV=		MAKEOBJDIRPREFIX=${OBJTREE}/nxb \
 		INSTALL="sh ${.CURDIR}/tools/install.sh" \
-		VERSION="${VERSION}" \
 		PATH=${PATH}:${OBJTREE}/gperf_for_gcc/usr/bin
 NXBMAKE=	${NXBENV} ${MAKE} \
 		TBLGEN=${OBJTREE}/nxb-bin/usr/bin/tblgen \
@@ -1955,22 +1957,18 @@ _startup_libs: ${_startup_libs:S/$/__L/}
 _prebuild_libs: ${_prebuild_libs:S/$/__L/}
 _generic_libs: ${_generic_libs:S/$/__L/}
 
-.for __target in all clean cleandepend cleandir depend includes obj
-.for entry in ${SUBDIR}
-${entry}.${__target}__D: .PHONY .MAKE
-	${_+_}@set -e; if test -d ${.CURDIR}/${entry}.${MACHINE_ARCH}; then \
-		${ECHODIR} "===> ${DIRPRFX}${entry}.${MACHINE_ARCH} (${__target})"; \
-		edir=${entry}.${MACHINE_ARCH}; \
-		cd ${.CURDIR}/$${edir}; \
-	else \
-		${ECHODIR} "===> ${DIRPRFX}${entry} (${__target})"; \
-		edir=${entry}; \
-		cd ${.CURDIR}/$${edir}; \
-	fi; \
-	${MAKE} ${__target} DIRPRFX=${DIRPRFX}$${edir}/
-.endfor
-par-${__target}: ${SUBDIR:S/$/.${__target}__D/}
-.endfor
+# Enable SUBDIR_PARALLEL when not calling 'make all', unless called as
+# 'par-all'.  This is because it is unlikely that running 'make all' from
+# the top-level, especially with a SUBDIR_OVERRIDE or LOCAL_DIRS set,
+# will have a reliable build if SUBDIRs are built in parallel.  This is
+# safe for the world stage of buildworld though since it has already
+# built libraries in a proper order and installed includes into WORLDTMP.
+# Special handling is done for SUBDIR ordering for 'install*' to avoid
+# trashing a system if it crashes mid-install.
+par-all: all .PHONY
+.if !make(all)
+SUBDIR_PARALLEL=
+.endif
 
 .include <bsd.subdir.mk>
 
@@ -2278,7 +2276,9 @@ _xi-cross-tools:
 .endfor
 
 _xi-includes:
-	${_+_}cd ${.CURDIR}; ${CD2MAKE} -f Makefile.inc1 par-includes \
+	${_+_}cd ${.CURDIR}; ${CD2MAKE} -f Makefile.inc1 buildincludes \
+		DESTDIR=${XDDESTDIR}
+	${_+_}cd ${.CURDIR}; ${CD2MAKE} -f Makefile.inc1 installincludes \
 		DESTDIR=${XDDESTDIR}
 
 _xi-libraries:
