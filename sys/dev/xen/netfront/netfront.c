@@ -59,10 +59,8 @@ __FBSDID("$FreeBSD$");
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/if_ether.h>
-#if __FreeBSD_version >= 700000
 #include <netinet/tcp.h>
 #include <netinet/tcp_lro.h>
-#endif
 
 #include <vm/vm.h>
 #include <vm/pmap.h>
@@ -94,7 +92,6 @@ __FBSDID("$FreeBSD$");
 #define NET_TX_RING_SIZE __RING_SIZE((netif_tx_sring_t *)0, PAGE_SIZE)
 #define NET_RX_RING_SIZE __RING_SIZE((netif_rx_sring_t *)0, PAGE_SIZE)
 
-#if __FreeBSD_version >= 700000
 /*
  * Should the driver do LRO on the RX end
  *  this can be toggled on the fly, but the
@@ -103,12 +100,6 @@ __FBSDID("$FreeBSD$");
  */
 static int xn_enable_lro = 1;
 TUNABLE_INT("hw.xn.enable_lro", &xn_enable_lro);
-#else
-
-#define IFCAP_TSO4	0
-#define CSUM_TSO	0
-
-#endif
 
 /**
  * \brief The maximum allowed data fragments in a single transmit
@@ -191,7 +182,7 @@ struct xn_chain_data {
 	struct mbuf    *xn_rx_chain[NET_RX_RING_SIZE+1];
 };
 
-struct net_device_stats
+struct netfront_stats
 {
 	u_long	rx_packets;		/* total packets received	*/
 	u_long	tx_packets;		/* total packets transmitted	*/
@@ -199,38 +190,13 @@ struct net_device_stats
 	u_long	tx_bytes;		/* total bytes transmitted	*/
 	u_long	rx_errors;		/* bad packets received		*/
 	u_long	tx_errors;		/* packet transmit problems	*/
-	u_long	rx_dropped;		/* no space in linux buffers	*/
-	u_long	tx_dropped;		/* no space available in linux	*/
-	u_long	multicast;		/* multicast packets received	*/
-	u_long	collisions;
-
-	/* detailed rx_errors: */
-	u_long	rx_length_errors;
-	u_long	rx_over_errors;		/* receiver ring buff overflow	*/
-	u_long	rx_crc_errors;		/* recved pkt with crc error	*/
-	u_long	rx_frame_errors;	/* recv'd frame alignment error */
-	u_long	rx_fifo_errors;		/* recv'r fifo overrun		*/
-	u_long	rx_missed_errors;	/* receiver missed packet	*/
-
-	/* detailed tx_errors */
-	u_long	tx_aborted_errors;
-	u_long	tx_carrier_errors;
-	u_long	tx_fifo_errors;
-	u_long	tx_heartbeat_errors;
-	u_long	tx_window_errors;
-
-	/* for cslip etc */
-	u_long	rx_compressed;
-	u_long	tx_compressed;
 };
 
 struct netfront_info {
 	struct ifnet *xn_ifp;
-#if __FreeBSD_version >= 700000
 	struct lro_ctrl xn_lro;
-#endif
 
-	struct net_device_stats stats;
+	struct netfront_stats stats;
 	u_int tx_full;
 
 	netif_tx_front_ring_t tx;
@@ -275,11 +241,6 @@ struct netfront_info {
 #define rx_mbufs xn_cdata.xn_rx_chain
 #define tx_mbufs xn_cdata.xn_tx_chain
 
-#define XN_LOCK_INIT(_sc, _name) \
-        mtx_init(&(_sc)->tx_lock, #_name"_tx", "network transmit lock", MTX_DEF); \
-        mtx_init(&(_sc)->rx_lock, #_name"_rx", "network receive lock", MTX_DEF);  \
-        mtx_init(&(_sc)->sc_lock, #_name"_sc", "netfront softc lock", MTX_DEF)
-
 #define XN_RX_LOCK(_sc)           mtx_lock(&(_sc)->rx_lock)
 #define XN_RX_UNLOCK(_sc)         mtx_unlock(&(_sc)->rx_lock)
 
@@ -292,9 +253,6 @@ struct netfront_info {
 #define XN_LOCK_ASSERT(_sc)    mtx_assert(&(_sc)->sc_lock, MA_OWNED);
 #define XN_RX_LOCK_ASSERT(_sc)    mtx_assert(&(_sc)->rx_lock, MA_OWNED);
 #define XN_TX_LOCK_ASSERT(_sc)    mtx_assert(&(_sc)->tx_lock, MA_OWNED);
-#define XN_LOCK_DESTROY(_sc)   mtx_destroy(&(_sc)->rx_lock); \
-                               mtx_destroy(&(_sc)->tx_lock); \
-                               mtx_destroy(&(_sc)->sc_lock);
 
 struct netfront_rx_info {
 	struct netif_rx_response rx;
@@ -454,12 +412,10 @@ netfront_attach(device_t dev)
 		return (err);
 	}
 
-#if __FreeBSD_version >= 700000
 	SYSCTL_ADD_INT(device_get_sysctl_ctx(dev),
 	    SYSCTL_CHILDREN(device_get_sysctl_tree(dev)),
 	    OID_AUTO, "enable_lro", CTLFLAG_RW,
 	    &xn_enable_lro, 0, "Large Receive Offload");
-#endif
 
 	return (0);
 }
@@ -553,13 +509,11 @@ talk_to_backend(device_t dev, struct netfront_info *info)
 		message = "writing feature-sg";
 		goto abort_transaction;
 	}
-#if __FreeBSD_version >= 700000
 	err = xs_printf(xst, node, "feature-gso-tcpv4", "%d", 1);
 	if (err) {
 		message = "writing feature-gso-tcpv4";
 		goto abort_transaction;
 	}
-#endif
 
 	err = xs_transaction_end(xst, 0);
 	if (err) {
@@ -888,10 +842,8 @@ static void
 xn_rxeof(struct netfront_info *np)
 {
 	struct ifnet *ifp;
-#if __FreeBSD_version >= 700000 && (defined(INET) || defined(INET6))
 	struct lro_ctrl *lro = &np->xn_lro;
 	struct lro_entry *queued;
-#endif
 	struct netfront_rx_info rinfo;
 	struct netif_rx_response *rx = &rinfo.rx;
 	struct netif_extra_info *extras = rinfo.extras;
@@ -963,7 +915,7 @@ xn_rxeof(struct netfront_info *np)
 			 * Do we really need to drop the rx lock?
 			 */
 			XN_RX_UNLOCK(np);
-#if __FreeBSD_version >= 700000 && (defined(INET) || defined(INET6))
+#if (defined(INET) || defined(INET6))
 			/* Use LRO if possible */
 			if ((ifp->if_capenable & IFCAP_LRO) == 0 ||
 			    lro->lro_cnt == 0 || tcp_lro_rx(lro, m, 0)) {
@@ -981,7 +933,7 @@ xn_rxeof(struct netfront_info *np)
 
 		np->rx.rsp_cons = i;
 
-#if __FreeBSD_version >= 700000 && (defined(INET) || defined(INET6))
+#if (defined(INET) || defined(INET6))
 		/*
 		 * Flush any outstanding LRO work
 		 */
@@ -1472,7 +1424,6 @@ xn_assemble_tx_request(struct netfront_info *sc, struct mbuf *m_head)
 				tx->flags |= (NETTXF_csum_blank
 				    | NETTXF_data_validated);
 			}
-#if __FreeBSD_version >= 700000
 			if (m->m_pkthdr.csum_flags & CSUM_TSO) {
 				struct netif_extra_info *gso =
 					(struct netif_extra_info *)
@@ -1490,7 +1441,6 @@ xn_assemble_tx_request(struct netfront_info *sc, struct mbuf *m_head)
 				gso->type = XEN_NETIF_EXTRA_TYPE_GSO;
 				gso->flags = 0;
 			}
-#endif
 		} else {
 			tx->size = m->m_len;
 		}
@@ -1682,7 +1632,6 @@ xn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 		if (mask & IFCAP_RXCSUM) {
 			ifp->if_capenable ^= IFCAP_RXCSUM;
 		}
-#if __FreeBSD_version >= 700000
 		if (mask & IFCAP_TSO4) {
 			if (IFCAP_TSO4 & ifp->if_capenable) {
 				ifp->if_capenable &= ~IFCAP_TSO4;
@@ -1700,7 +1649,6 @@ xn_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 			ifp->if_capenable ^= IFCAP_LRO;
 
 		}
-#endif
 		error = 0;
 		break;
 	case SIOCADDMULTI:
@@ -1862,14 +1810,14 @@ xn_configure_features(struct netfront_info *np)
 	else
 		cap_enabled = UINT_MAX;
 
-#if __FreeBSD_version >= 700000 && (defined(INET) || defined(INET6))
+#if (defined(INET) || defined(INET6))
 	if ((np->xn_ifp->if_capenable & IFCAP_LRO) == (cap_enabled & IFCAP_LRO))
 		tcp_lro_free(&np->xn_lro);
 #endif
     	np->xn_ifp->if_capenable =
 	    np->xn_ifp->if_capabilities & ~(IFCAP_LRO|IFCAP_TSO4) & cap_enabled;
 	np->xn_ifp->if_hwassist &= ~CSUM_TSO;
-#if __FreeBSD_version >= 700000 && (defined(INET) || defined(INET6))
+#if (defined(INET) || defined(INET6))
 	if (xn_enable_lro && (np->xn_ifp->if_capabilities & IFCAP_LRO) ==
 	    (cap_enabled & IFCAP_LRO)) {
 		err = tcp_lro_init(&np->xn_lro);
@@ -1905,7 +1853,9 @@ create_netdev(device_t dev)
 
 	np->xbdev         = dev;
 
-	XN_LOCK_INIT(np, xennetif);
+	mtx_init(&np->tx_lock, "xntx", "netfront transmit lock", MTX_DEF);
+	mtx_init(&np->rx_lock, "xnrx", "netfront receive lock", MTX_DEF);
+	mtx_init(&np->sc_lock, "xnsc", "netfront softc lock", MTX_DEF);
 
 	ifmedia_init(&np->sc_media, 0, xn_ifmedia_upd, xn_ifmedia_sts);
 	ifmedia_add(&np->sc_media, IFM_ETHER|IFM_MANUAL, 0, NULL);
@@ -1935,7 +1885,7 @@ create_netdev(device_t dev)
 					  &np->gref_tx_head) != 0) {
 		IPRINTK("#### netfront can't alloc tx grant refs\n");
 		err = ENOMEM;
-		goto exit;
+		goto error;
 	}
 	/* A grant for every rx ring slot */
 	if (gnttab_alloc_grant_references(RX_MAX_TARGET,
@@ -1943,12 +1893,15 @@ create_netdev(device_t dev)
 		WPRINTK("#### netfront can't alloc rx grant refs\n");
 		gnttab_free_grant_references(np->gref_tx_head);
 		err = ENOMEM;
-		goto exit;
+		goto error;
 	}
 
 	err = xen_net_read_mac(dev, np->mac);
-	if (err)
-		goto out;
+	if (err) {
+		gnttab_free_grant_references(np->gref_rx_head);
+		gnttab_free_grant_references(np->gref_tx_head);
+		goto error;
+	}
 
 	/* Set up ifnet structure */
 	ifp = np->xn_ifp = if_alloc(IFT_ETHER);
@@ -1956,7 +1909,6 @@ create_netdev(device_t dev)
     	if_initname(ifp, "xn",  device_get_unit(dev));
     	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
     	ifp->if_ioctl = xn_ioctl;
-    	ifp->if_output = ether_output;
     	ifp->if_start = xn_start;
 #ifdef notyet
     	ifp->if_watchdog = xn_watchdog;
@@ -1976,9 +1928,8 @@ create_netdev(device_t dev)
 
 	return (0);
 
-exit:
-	gnttab_free_grant_references(np->gref_tx_head);
-out:
+error:
+	KASSERT(err != 0, ("Error path with no error code specified"));
 	return (err);
 }
 
