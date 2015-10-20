@@ -35,11 +35,9 @@
 #include <servers/bootstrap.h>
 #include <bootstrap_priv.h>
 #include <mach/mach.h>
-#include <copyfile.h>
 #include <fcntl.h>
 #include <zlib.h>
 #include <xpc/xpc.h>
-#include <xpc/private.h>
 #include <os/assumes.h>
 #include <vproc_priv.h>
 #include <asl.h>
@@ -414,7 +412,7 @@ filesystem_copy(asl_out_dst_data_t *asldst, const char *src, const char *dst, ui
 	}
 	else
 	{
-		int status = copyfile(src, dst, NULL, COPYFILE_ALL | COPYFILE_RECURSIVE);
+		int status = 0; //copyfile(src, dst, NULL, COPYFILE_ALL | COPYFILE_RECURSIVE);
 		if (status != 0)
 		{
 			debug_log(ASL_LEVEL_ERR, "  FAILED status %d errno %d [%s] copy %s ---> %s\n", status, errno, strerror(errno), src, dst);
@@ -1595,7 +1593,7 @@ main(int argc, char *argv[])
 
 	/* XPC server */
 	serverq = dispatch_queue_create("aslmanager", NULL);
-	xpc_track_activity();
+	//xpc_track_activity();
 
 	/* Handle incoming messages. */
 	listener = xpc_connection_create_mach_service("com.apple.aslmanager", serverq, XPC_CONNECTION_MACH_SERVICE_LISTENER);
