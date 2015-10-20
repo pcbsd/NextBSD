@@ -41,10 +41,10 @@
 .Sh DESCRIPTION
 .Nm aslmanager 
 manages rotated files and ASL data written by the
-.Nm syslogd
+.Nm asld
 server.
 It is started automatically at various times by
-.Nm syslogd .
+.Nm asld .
 It may also be invoked from the command line by the superuser (root).
 It manages the life-cycle of data in the ASL database, rotated log files,
 and ASL directory data stores.
@@ -73,7 +73,7 @@ If
 is specified, then
 .Nm aslmanager
 will signal
-.Nm syslogd
+.Nm asld
 to checkpoint files for all modules, or for a single named module, before processing.
 .Pp
 The
@@ -147,7 +147,7 @@ For each ASL output module, or a single module specified as an argument followin
 .Fl module ,
 .Nm aslmanager
 first locates all checkpoint files produced by
-.Nm syslogd
+.Nm asld
 for that module.
 .Nm aslmanager
 checks all ASL directory data stores and all rotated log files - those with a
@@ -192,8 +192,9 @@ and will delete data files (oldest first) to limit the total size as specified b
 .Dq all_max .
 .Pp
 .Sh SEE ALSO
+.Xr asld 8 ,
 .Xr syslogd 8 ,
-.Xr syslog 1 ,
+.Xr aslutil 1 ,
 .Xr asl 3 ,
 .Xr asl.conf 5 ,
 .Xr syslog 3 .
