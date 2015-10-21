@@ -5,6 +5,7 @@
 FILES=	${_BSD.debug.dist} \
 	BSD.include.dist \
 	BSD.root.dist \
+	${_BSD.lib32.dist} \
 	${_BSD.tests.dist} \
 	BSD.usr.dist \
 	BSD.var.dist
@@ -14,6 +15,9 @@ _BSD.debug.dist=	BSD.debug.dist
 .endif
 .if ${MK_GROFF} != "no"
 _BSD.groff.dist=	BSD.groff.dist
+.endif
+.if ${MK_LIB32} != "no"
+_BSD.lib32.dist=	BSD.lib32.dist
 .endif
 .if ${MK_TESTS} != "no"
 _BSD.tests.dist=	BSD.tests.dist
