@@ -63,30 +63,25 @@ distribute: .MAKE
 .endfor
 .endif
 
-_SUBDIR: .USE .MAKE
-.if defined(SUBDIR) && !empty(SUBDIR) && !defined(NO_SUBDIR)
-	@${_+_}for entry in ${SUBDIR:N.WAIT}; do \
-		if test -d ${.CURDIR}/$${entry}.${MACHINE_ARCH}; then \
-			${ECHODIR} "===> ${DIRPRFX}$${entry}.${MACHINE_ARCH} (${.TARGET:S,realinstall,install,:S,^_sub.,,})"; \
-			edir=$${entry}.${MACHINE_ARCH}; \
-			cd ${.CURDIR}/$${edir}; \
-		else \
-			${ECHODIR} "===> ${DIRPRFX}$$entry (${.TARGET:S,realinstall,install,:S,^_sub.,,})"; \
-			edir=$${entry}; \
-			cd ${.CURDIR}/$${edir}; \
+# Subdir code shared among 'make <subdir>', 'make <target>' and SUBDIR_PARALLEL.
+_SUBDIR_SH=	\
+		if test -d ${.CURDIR}/$${dir}.${MACHINE_ARCH}; then \
+			dir=$${dir}.${MACHINE_ARCH}; \
 		fi; \
-		${MAKE} ${.TARGET:S,realinstall,install,:S,^_sub.,,} \
-		    DIRPRFX=${DIRPRFX}$$edir/; \
-	done
+		${ECHODIR} "===> ${DIRPRFX}$${dir} ($${target})"; \
+		cd ${.CURDIR}/$${dir}; \
+		${MAKE} $${target} DIRPRFX=${DIRPRFX}$${dir}/
+
+_SUBDIR: .USEBEFORE
+.if defined(SUBDIR) && !empty(SUBDIR) && !defined(NO_SUBDIR)
+	@${_+_}target=${.TARGET:S,realinstall,install,}; \
+	    for dir in ${SUBDIR:N.WAIT}; do ${_SUBDIR_SH}; done
 .endif
 
 ${SUBDIR:N.WAIT}: .PHONY .MAKE
-	${_+_}@if test -d ${.TARGET}.${MACHINE_ARCH}; then \
-		cd ${.CURDIR}/${.TARGET}.${MACHINE_ARCH}; \
-	else \
-		cd ${.CURDIR}/${.TARGET}; \
-	fi; \
-	${MAKE} all
+	${_+_}@target=all; \
+	    dir=${.TARGET}; \
+	    ${_SUBDIR_SH};
 
 # Work around parsing of .if nested in .for by putting .WAIT string into a var.
 __wait= .WAIT
@@ -102,26 +97,17 @@ __deps=
 .for __dep in ${SUBDIR_DEPEND_${__dir}}
 __deps+= ${__target}_subdir_${__dep}
 .endfor
-${__target}_subdir_${__dir}: .MAKE ${__deps}
+${__target}_subdir_${__dir}: .PHONY .MAKE ${__deps}
 .if !defined(NO_SUBDIR)
-	@${_+_}if test -d ${.CURDIR}/${__dir}.${MACHINE_ARCH}; then \
-			${ECHODIR} "===> ${DIRPRFX}${__dir}.${MACHINE_ARCH} (${__target:realinstall=install})"; \
-			edir=${__dir}.${MACHINE_ARCH}; \
-			cd ${.CURDIR}/$${edir}; \
-		else \
-			${ECHODIR} "===> ${DIRPRFX}${__dir} (${__target:realinstall=install})"; \
-			edir=${__dir}; \
-			cd ${.CURDIR}/$${edir}; \
-		fi; \
-		${MAKE} ${__target:realinstall=install} \
-		    DIRPRFX=${DIRPRFX}$$edir/
+	@${_+_}target=${__target:realinstall=install}; \
+	    dir=${__dir}; \
+	    ${_SUBDIR_SH};
 .endif
 .endif
 .endfor
 ${__target}: ${__subdir_targets}
 .else
-${__target}: _sub.${__target}
-_sub.${__target}: _SUBDIR
+${__target}: _SUBDIR
 .endif
 .endfor
 
@@ -132,8 +118,7 @@ _sub.${__target}: _SUBDIR
 .for __stage in build install
 ${__stage}${__target}:
 .if make(${__stage}${__target})
-${__stage}${__target}: _sub.${__stage}${__target}
-_sub.${__stage}${__target}: _SUBDIR
+${__stage}${__target}: _SUBDIR
 .endif
 .endfor
 .if !target(${__target})
