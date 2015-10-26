@@ -119,7 +119,7 @@ MALLOC_DECLARE(M_IOAT);
 
 SYSCTL_DECL(_hw_ioat);
 
-void ioat_log_message(int verbosity, char *fmt, ...);
+extern int g_ioat_debug_level;
 
 struct ioat_dma_hw_descriptor {
 	uint32_t size;
@@ -365,6 +365,9 @@ struct ioat_softc {
 
 	struct mtx		cleanup_lock;
 };
+
+void ioat_test_attach(void);
+void ioat_test_detach(void);
 
 static inline uint64_t
 ioat_get_chansts(struct ioat_softc *ioat)
