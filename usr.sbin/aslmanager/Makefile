@@ -16,14 +16,14 @@ BASE_INCLUDE+= -I${.CURDIR}/../../include -I${.CURDIR}/../../sys
 DEFINES= -D__APPLE__ -fblocks -DLIBC_NO_LIBCRASHREPORTERCLIENT -DPRIVATE
 MIG_FLAGS= ${BASE_INCLUDE} 	${DEFINES}
 #override default CFLAGS
-CFLAGS= ${MIG_FLAGS}  -D__MigTypeCheck 
+CFLAGS= ${MIG_FLAGS}  -D__MigTypeCheck
 CFLAGS+= -I${.CURDIR}/../../contrib/openbsm -I${.CURDIR}/../../lib/liblaunch -I${.CURDIR}/../../lib/libasl -I${.CURDIR}/../../lib/libdispatch
 CFLAGS+= -I${.CURDIR}/../../lib/libxpc -I${.CURDIR}/../../lib/libosxsupport
 CFLAGS+= -DHAVE_INTTYPES_H
 
 LDFLAGS+= -pthread
 
-SRCS= aslmanager.c 
+SRCS= aslmanager.c
 LDADD+= -lz -lutil -lauditd -lbsm -ldispatch -lmach -lBlocksRuntime -llaunch -losxsupport -lxpc -lnotify -lnv -lsbuf -lasl
 
 .include <bsd.prog.mk>

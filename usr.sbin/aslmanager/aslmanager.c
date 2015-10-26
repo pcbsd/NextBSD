@@ -2,14 +2,14 @@
  * Copyright (c) 2007-2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -17,7 +17,7 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
@@ -338,10 +338,10 @@ void
 filesystem_unlink(const char *path)
 {
 	int status = 0;
-	
+
 	debug_log(ASL_LEVEL_NOTICE, "  remove %s\n", path);
 	if (dryrun == 1) return;
-	
+
 	status = unlink(path);
 	if (status != 0) debug_log(ASL_LEVEL_ERR, "  FAILED status %d errno %d [%s] unlink %s\n", status, errno, strerror(errno), path);
 }
@@ -350,10 +350,10 @@ void
 filesystem_truncate(const char *path)
 {
 	int status = 0;
-	
+
 	debug_log(ASL_LEVEL_NOTICE, "  truncate %s\n", path);
 	if (dryrun == 1) return;
-	
+
 	status = truncate(path, 0);
 	if (status != 0) debug_log(ASL_LEVEL_ERR, "  FAILED status %d errno %d [%s] unlink %s\n", status, errno, strerror(errno), path);
 }
@@ -1028,7 +1028,7 @@ process_asl_data_store(asl_out_dst_data_t *dst)
 		}
 	}
 
-	free_name_list(ymd_list);	 
+	free_name_list(ymd_list);
 	free_name_list(bb_list);
 	free_name_list(aux_list);
 	free_name_list(bb_aux_list);
@@ -1259,7 +1259,7 @@ module_check_size(asl_out_dst_data_t *dst)
 
 	total = 0;
 	for (f = dst_list; f != NULL; f = f->next) total += f->size;
-	
+
 	for (f = dst_end; (total > dst->all_max) && (f != NULL); f = f->prev)
 	{
 		snprintf(fpath, sizeof(fpath), "%s/%s", dst_dir, f->name);

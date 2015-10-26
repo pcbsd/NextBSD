@@ -39,7 +39,7 @@
 .Op Fl d Op level
 .Op Fl dd Op level
 .Sh DESCRIPTION
-.Nm aslmanager 
+.Nm aslmanager
 manages rotated files and ASL data written by the
 .Nm asld
 server.
@@ -86,10 +86,10 @@ An integer value (1, 2, or 3) may follow the
 flag.
 Higher values cause more fine-grained messages to be printed.
 The default value is 1.
-The 
+The
 .Fl dd
 flag directs
-.Nm 
+.Nm
 to do a
 .Dq dry run .
 Debug messages are printed as with
@@ -112,7 +112,7 @@ The default 7 day time-to-live value may be overridden by the setting of the
 parameter in asl.conf or by supplying a value following the
 .Fl store_ttl
 flag or the
-.Fl ttl 
+.Fl ttl
 flag (which overrides the time-to-live for both the ASL database and for all ASL modules).
 A time-to-live value of zero allows files to remain in the store with no time limit.
 .Pp
@@ -156,7 +156,7 @@ option in the module's configuration rules.
 Checkpoint files are renamed if necessary to conform to the naming style specified for the file by a
 .Dq style
 option in the module's configuration file.
-.Nm aslmanager 
+.Nm aslmanager
 will compress the file if directed by a
 .Dq compress
 option, and it will move the file to a destination directory if a
