@@ -1090,8 +1090,13 @@ isp_reset(ispsoftc_t *isp, int do_load_defaults)
 		} else {
 			isp->isp_fwattr = mbs.param[6];
 		}
-		if (IS_24XX(isp) && (isp->isp_fwattr & ISP2400_FW_ATTR_EXTNDED)) {
-			isp->isp_fwattr |= (((uint64_t) mbs.param[15]) << 16) | (((uint64_t) mbs.param[16]) << 32) | (((uint64_t) mbs.param[17]) << 48);
+		if (IS_24XX(isp)) {
+			isp->isp_fwattr |= ((uint64_t) mbs.param[15]) << 16;
+			if (isp->isp_fwattr & ISP2400_FW_ATTR_EXTNDED) {
+				isp->isp_fwattr |=
+				    (((uint64_t) mbs.param[16]) << 32) |
+				    (((uint64_t) mbs.param[17]) << 48);
+			}
 		}
 	} else if (IS_SCSI(isp)) {
 #ifndef	ISP_TARGET_MODE
@@ -1132,6 +1137,18 @@ isp_reset(ispsoftc_t *isp, int do_load_defaults)
 			fwt ^=ISP2400_FW_ATTR_VI;
 			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s VI", buf);
 		}
+		if (fwt & ISP2400_FW_ATTR_MQ) {
+			fwt ^=ISP2400_FW_ATTR_MQ;
+			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s MQ", buf);
+		}
+		if (fwt & ISP2400_FW_ATTR_MSIX) {
+			fwt ^=ISP2400_FW_ATTR_MSIX;
+			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s MSIX", buf);
+		}
+		if (fwt & ISP2400_FW_ATTR_FCOE) {
+			fwt ^=ISP2400_FW_ATTR_FCOE;
+			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s FCOE", buf);
+		}
 		if (fwt & ISP2400_FW_ATTR_VP0) {
 			fwt ^= ISP2400_FW_ATTR_VP0;
 			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s VP0_Decoupling", buf);
@@ -1140,7 +1157,43 @@ isp_reset(ispsoftc_t *isp, int do_load_defaults)
 			fwt ^= ISP2400_FW_ATTR_EXPFW;
 			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s (Experimental)", buf);
 		}
+		if (fwt & ISP2400_FW_ATTR_HOTFW) {
+			fwt ^= ISP2400_FW_ATTR_HOTFW;
+			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s HotFW", buf);
+		}
 		fwt &= ~ISP2400_FW_ATTR_EXTNDED;
+		if (fwt & ISP2400_FW_ATTR_EXTVP) {
+			fwt ^= ISP2400_FW_ATTR_EXTVP;
+			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s ExtVP", buf);
+		}
+		if (fwt & ISP2400_FW_ATTR_VN2VN) {
+			fwt ^= ISP2400_FW_ATTR_VN2VN;
+			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s VN2VN", buf);
+		}
+		if (fwt & ISP2400_FW_ATTR_EXMOFF) {
+			fwt ^= ISP2400_FW_ATTR_EXMOFF;
+			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s EXMOFF", buf);
+		}
+		if (fwt & ISP2400_FW_ATTR_NPMOFF) {
+			fwt ^= ISP2400_FW_ATTR_NPMOFF;
+			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s NPMOFF", buf);
+		}
+		if (fwt & ISP2400_FW_ATTR_DIFCHOP) {
+			fwt ^= ISP2400_FW_ATTR_DIFCHOP;
+			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s DIFCHOP", buf);
+		}
+		if (fwt & ISP2400_FW_ATTR_SRIOV) {
+			fwt ^= ISP2400_FW_ATTR_SRIOV;
+			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s SRIOV", buf);
+		}
+		if (fwt & ISP2400_FW_ATTR_ASICTMP) {
+			fwt ^= ISP2400_FW_ATTR_ASICTMP;
+			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s ASICTMP", buf);
+		}
+		if (fwt & ISP2400_FW_ATTR_ATIOMQ) {
+			fwt ^= ISP2400_FW_ATTR_ATIOMQ;
+			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s ATIOMQ", buf);
+		}
 		if (fwt) {
 			ISP_SNPRINTF(buf, ISP_FC_SCRLEN - strlen(buf), "%s (unknown 0x%08x%08x)", buf,
 			    (uint32_t) (fwt >> 32), (uint32_t) fwt);
@@ -1901,6 +1954,7 @@ isp_fibre_init(ispsoftc_t *isp)
 	 * Init the firmware
 	 */
 	MBSINIT(&mbs, MBOX_INIT_FIRMWARE, MBLOGALL, 30000000);
+	mbs.param[1] = 0;
 	mbs.param[2] = DMA_WD1(fcp->isp_scdma);
 	mbs.param[3] = DMA_WD0(fcp->isp_scdma);
 	mbs.param[6] = DMA_WD3(fcp->isp_scdma);
@@ -2021,10 +2075,11 @@ isp_fibre_init_2400(ispsoftc_t *isp)
 		icbp->icb_fwoptions2 |= ICB2400_OPT2_FCTAPE;
 	}
 
-	if (icbp->icb_fwoptions2 & ICB2400_OPT2_FCTAPE) {
-		FCPARAM(isp, chan)->fctape_enabled = 1;
-	} else {
-		FCPARAM(isp, chan)->fctape_enabled = 0;
+	for (chan = 0; chan < isp->isp_nchan; chan++) {
+		if (icbp->icb_fwoptions2 & ICB2400_OPT2_FCTAPE)
+			FCPARAM(isp, chan)->fctape_enabled = 1;
+		else
+			FCPARAM(isp, chan)->fctape_enabled = 0;
 	}
 
 	switch (isp->isp_confopts & ISP_CFG_PORT_PREF) {
@@ -2155,31 +2210,39 @@ isp_fibre_init_2400(ispsoftc_t *isp)
 		size_t amt = 0;
 		uint8_t *off;
 
-		vpinfo.vp_count = isp->isp_nchan - 1;
 		vpinfo.vp_global_options = 0;
+		if (isp->isp_fwattr & ISP2400_FW_ATTR_VP0) {
+			vpinfo.vp_global_options |= ICB2400_VPGOPT_VP0_DECOUPLE;
+			vpinfo.vp_count = isp->isp_nchan;
+			chan = 0;
+		} else {
+			vpinfo.vp_count = isp->isp_nchan - 1;
+			chan = 1;
+		}
 		off = fcp->isp_scratch;
 		off += ICB2400_VPINFO_OFF;
 		vdst = (isp_icb_2400_vpinfo_t *) off;
 		isp_put_icb_2400_vpinfo(isp, &vpinfo, vdst);
 		amt = ICB2400_VPINFO_OFF + sizeof (isp_icb_2400_vpinfo_t);
-		for (chan = 1; chan < isp->isp_nchan; chan++) {
+		for (; chan < isp->isp_nchan; chan++) {
 			fcparam *fcp2;
 
 			ISP_MEMZERO(&pi, sizeof (pi));
 			fcp2 = FCPARAM(isp, chan);
 			if (fcp2->role != ISP_ROLE_NONE) {
 				pi.vp_port_options = ICB2400_VPOPT_ENABLED;
-				if (fcp2->role & ISP_ROLE_INITIATOR) {
+				if (fcp2->role & ISP_ROLE_INITIATOR)
 					pi.vp_port_options |= ICB2400_VPOPT_INI_ENABLE;
-				}
-				if ((fcp2->role & ISP_ROLE_TARGET) == 0) {
+				if ((fcp2->role & ISP_ROLE_TARGET) == 0)
 					pi.vp_port_options |= ICB2400_VPOPT_TGT_DISABLE;
-				}
-				MAKE_NODE_NAME_FROM_WWN(pi.vp_port_portname, fcp2->isp_wwpn);
-				MAKE_NODE_NAME_FROM_WWN(pi.vp_port_nodename, fcp2->isp_wwnn);
 			}
+			MAKE_NODE_NAME_FROM_WWN(pi.vp_port_portname, fcp2->isp_wwpn);
+			MAKE_NODE_NAME_FROM_WWN(pi.vp_port_nodename, fcp2->isp_wwnn);
 			off = fcp->isp_scratch;
-			off += ICB2400_VPINFO_PORT_OFF(chan);
+			if (isp->isp_fwattr & ISP2400_FW_ATTR_VP0)
+				off += ICB2400_VPINFO_PORT_OFF(chan);
+			else
+				off += ICB2400_VPINFO_PORT_OFF(chan - 1);
 			pdst = (vp_port_info_t *) off;
 			isp_put_vp_port_info(isp, &pi, pdst);
 			amt += ICB2400_VPOPT_WRITE_SIZE;
@@ -2200,6 +2263,7 @@ isp_fibre_init_2400(ispsoftc_t *isp)
 	} else {
 		mbs.param[0] = MBOX_INIT_FIRMWARE;
 	}
+	mbs.param[1] = 0;
 	mbs.param[2] = DMA_WD1(fcp->isp_scdma);
 	mbs.param[3] = DMA_WD0(fcp->isp_scdma);
 	mbs.param[6] = DMA_WD3(fcp->isp_scdma);
@@ -4973,7 +5037,7 @@ isp_control(ispsoftc_t *isp, ispctl_t ctl, ...)
 #endif
 
 void
-isp_intr(ispsoftc_t *isp, uint32_t isr, uint16_t sema, uint16_t mbox)
+isp_intr(ispsoftc_t *isp, uint16_t isr, uint16_t sema, uint16_t info)
 {
 	XS_T *complist[MAX_REQUESTQ_COMPLETIONS], *xs;
 	uint32_t iptr, optr, junk;
@@ -4987,11 +5051,11 @@ again:
 	 */
 	if (sema) {
  fmbox:
-		if (mbox & MBOX_COMMAND_COMPLETE) {
+		if (info & MBOX_COMMAND_COMPLETE) {
 			isp->isp_intmboxc++;
 			if (isp->isp_mboxbsy) {
 				int obits = isp->isp_obits;
-				isp->isp_mboxtmp[0] = mbox;
+				isp->isp_mboxtmp[0] = info;
 				for (i = 1; i < ISP_NMBOX(isp); i++) {
 					if ((obits & (1 << i)) == 0) {
 						continue;
@@ -5005,15 +5069,15 @@ again:
 				}
 				MBOX_NOTIFY_COMPLETE(isp);
 			} else {
-				isp_prt(isp, ISP_LOGWARN, "mailbox cmd (0x%x) with no waiters", mbox);
+				isp_prt(isp, ISP_LOGWARN, "mailbox cmd (0x%x) with no waiters", info);
 			}
 		} else {
-			i = IS_FC(isp)? isp_parse_async_fc(isp, mbox) : isp_parse_async(isp, mbox);
+			i = IS_FC(isp)? isp_parse_async_fc(isp, info) : isp_parse_async(isp, info);
 			if (i < 0) {
 				return;
 			}
 		}
-		if ((IS_FC(isp) && mbox != ASYNC_RIOZIO_STALL) || isp->isp_state != ISP_RUNSTATE) {
+		if ((IS_FC(isp) && info != ASYNC_RIOZIO_STALL) || isp->isp_state != ISP_RUNSTATE) {
 			goto out;
 		}
 	}
@@ -5028,7 +5092,8 @@ again:
 		 if (isp->isp_mboxbsy && isp->isp_lastmbxcmd == MBOX_ABOUT_FIRMWARE) {
 			goto fmbox;
 		}
-		isp_prt(isp, ISP_LOGINFO, "interrupt (ISR=%x SEMA=%x) when not ready", isr, sema);
+		isp_prt(isp, ISP_LOGINFO, "interrupt (ISR=%x SEMA=%x INFO=%x) "
+		    "when not ready", isr, sema, info);
 		/*
 		 * Thank you very much!  *Burrrp*!
 		 */
@@ -5046,8 +5111,8 @@ again:
 	 * Check for ATIO Queue entries.
 	 */
 	if (IS_24XX(isp) &&
-	    ((isr & BIU2400_R2HST_ISTAT_MASK) == ISP2400R2HST_ATIO_RSPQ_UPDATE ||
-	     (isr & BIU2400_R2HST_ISTAT_MASK) == ISP2400R2HST_ATIO_RQST_UPDATE)) {
+	    (isr == ISPR2HST_ATIO_UPDATE || isr == ISPR2HST_ATIO_RSPQ_UPDATE ||
+	     isr == ISPR2HST_ATIO_UPDATE2)) {
 		iptr = ISP_READ(isp, BIU2400_ATIO_RSPINP);
 		optr = isp->isp_atioodx;
 
@@ -5081,25 +5146,6 @@ again:
 #endif
 
 	/*
-	 * Get the current Response Queue Out Pointer.
-	 *
-	 * If we're a 2300 or 2400, we can ask what hardware what it thinks.
-	 */
-#if 0
-	if (IS_23XX(isp) || IS_24XX(isp)) {
-		optr = ISP_READ(isp, isp->isp_respoutrp);
-		/*
-		 * Debug: to be taken out eventually
-		 */
-		if (isp->isp_resodx != optr) {
-			isp_prt(isp, ISP_LOGINFO, "isp_intr: hard optr=%x, soft optr %x", optr, isp->isp_resodx);
-			isp->isp_resodx = optr;
-		}
-	} else
-#endif
-		optr = isp->isp_resodx;
-
-	/*
 	 * You *must* read the Response Queue In Pointer
 	 * prior to clearing the RISC interrupt.
 	 *
@@ -5120,6 +5166,7 @@ again:
 		iptr = ISP_READ(isp, isp->isp_respinrp);
 	}
 
+	optr = isp->isp_resodx;
 	if (optr == iptr && sema == 0) {
 		/*
 		 * There are a lot of these- reasons unknown- mostly on
@@ -5143,8 +5190,8 @@ again:
 				;
 			} else {
 				sema = ISP_READ(isp, BIU_SEMA);
-				mbox = ISP_READ(isp, OUTMAILBOX0);
-				if ((sema & 0x3) && (mbox & 0x8000)) {
+				info = ISP_READ(isp, OUTMAILBOX0);
+				if ((sema & 0x3) && (info & 0x8000)) {
 					goto again;
 				}
 			}
@@ -7055,7 +7102,7 @@ static const uint32_t mbpfc[] = {
 	ISP_FC_OPMAP(0x00, 0x00),	/* 0x45: */
 	ISP_FC_OPMAP(0x00, 0x00),	/* 0x46: */
 	ISP_FC_OPMAP(0xcf, 0x03),	/* 0x47: GET PORT_DATABASE ENHANCED */
-	ISP_FC_OPMAP(0xcd, 0x01),	/* 0x48: MBOX_INIT_FIRMWARE_MULTI_ID */
+	ISP_FC_OPMAP(0xcf, 0x0f),	/* 0x48: MBOX_INIT_FIRMWARE_MULTI_ID */
 	ISP_FC_OPMAP(0xcd, 0x01),	/* 0x49: MBOX_GET_VP_DATABASE */
 	ISP_FC_OPMAP_HALF(0x2, 0xcd, 0x0, 0x01),	/* 0x4a: MBOX_GET_VP_DATABASE_ENTRY */
 	ISP_FC_OPMAP(0x00, 0x00),	/* 0x4b: */
@@ -7079,7 +7126,7 @@ static const uint32_t mbpfc[] = {
 	ISP_FC_OPMAP(0x07, 0x03),	/* 0x5d: MBOX_GET_SET_DATA_RATE */
 	ISP_FC_OPMAP(0x00, 0x00),	/* 0x5e: */
 	ISP_FC_OPMAP(0x00, 0x00),	/* 0x5f: */
-	ISP_FC_OPMAP(0xcd, 0x01),	/* 0x60: MBOX_INIT_FIRMWARE */
+	ISP_FC_OPMAP(0xcf, 0x0f),	/* 0x60: MBOX_INIT_FIRMWARE */
 	ISP_FC_OPMAP(0x00, 0x00),	/* 0x61: */
 	ISP_FC_OPMAP(0x01, 0x01),	/* 0x62: MBOX_INIT_LIP */
 	ISP_FC_OPMAP(0xcd, 0x03),	/* 0x63: MBOX_GET_FC_AL_POSITION_MAP */

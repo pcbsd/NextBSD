@@ -7,6 +7,7 @@
 
 CLEANFILES= osreldate.h version vers.c
 SUBDIR= arpa mach mach_debug protocols rpcsvc rpc xlocale
+SUBDIR_PARALLEL=
 INCS=	a.out.h ar.h assert.h bitstring.h complex.h cpio.h _ctype.h ctype.h \
 	db.h \
 	dirent.h dlfcn.h elf.h elf-hints.h err.h fmtmsg.h fnmatch.h fstab.h \
@@ -79,6 +80,10 @@ LSUBDIRS=	cam/ata cam/scsi \
 	sys/mach sys/mach_debug
 
 LSUBSUBDIRS=	dev/mpt/mpilib sys/mach/ipc sys/mach/device
+
+# these exist due to them not having been present in BSD.include.dist
+# as well as a bug in bsd.incs.mk - can be removed after a grace period
+WRONGLY_ADDED_AS_FILES= gen apple/uuid
 
 .if ${MK_BLUETOOTH} != "no"
 LSUBSUBDIRS+=	netgraph/bluetooth/include
@@ -306,6 +311,14 @@ copies:
 .if ${MK_META_MODE} == "yes"
 	@touch ${.OBJDIR}/${.TARGET}
 .endif
+.for _F in ${WRONGLY_ADDED_AS_FILES}
+	if [ -f ${DESTDIR}${INCLUDEDIR}/${_F} ]; then \
+		rm -f ${DESTDIR}${INCLUDEDIR}/${_F}; \
+		mkdir ${DESTDIR}${INCLUDEDIR}/${_F}; \
+	fi
+.endfor
+
+
 
 symlinks:
 	@${ECHO} "Setting up symlinks to kernel source tree..."

@@ -54,7 +54,6 @@ int isp_fabric_hysteresis = 5;
 int isp_loop_down_limit = 60;	/* default loop down limit */
 int isp_quickboot_time = 7;	/* don't wait more than N secs for loop up */
 int isp_gone_device_time = 30;	/* grace time before reporting device lost */
-int isp_autoconfig = 1;		/* automatically attach/detach devices */
 static const char prom3[] = "Chan %d [%u] PortID 0x%06x Departed because of %s";
 
 static void isp_freeze_loopdown(ispsoftc_t *, int, char *);
@@ -205,30 +204,55 @@ isp_attach_chan(ispsoftc_t *isp, struct cam_devq *devq, int chan)
 			cam_sim_free(fc->sim, FALSE);
 			return (ENOMEM);
 		}
-		ISP_FC_PC(isp, chan)->num_threads += 1;
+		fc->num_threads += 1;
 #ifdef	ISP_INTERNAL_TARGET
 		ISP_SET_PC(isp, chan, proc_active, 1);
 		if (THREAD_CREATE(isp_target_thread_fc, fc, &fc->target_proc, 0, 0, "%s: isp_test_tgt%d", device_get_nameunit(isp->isp_osinfo.dev), chan)) {
 			ISP_SET_PC(isp, chan, proc_active, 0);
 			isp_prt(isp, ISP_LOGERR, "cannot create test target thread");
 		}
-		ISP_FC_PC(isp, chan)->num_threads += 1;
+		fc->num_threads += 1;
 #endif
 		if (chan > 0) {
 			snprintf(name, sizeof(name), "chan%d", chan);
 			tree = SYSCTL_ADD_NODE(ctx, SYSCTL_CHILDREN(tree),
 			    OID_AUTO, name, CTLFLAG_RW, 0, "Virtual channel");
 		}
-		SYSCTL_ADD_QUAD(ctx, SYSCTL_CHILDREN(tree), OID_AUTO, "wwnn", CTLFLAG_RD, &FCPARAM(isp, chan)->isp_wwnn, "World Wide Node Name");
-		SYSCTL_ADD_QUAD(ctx, SYSCTL_CHILDREN(tree), OID_AUTO, "wwpn", CTLFLAG_RD, &FCPARAM(isp, chan)->isp_wwpn, "World Wide Port Name");
-		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO, "loop_down_limit", CTLFLAG_RW, &ISP_FC_PC(isp, chan)->loop_down_limit, 0, "Loop Down Limit");
-		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO, "gone_device_time", CTLFLAG_RW, &ISP_FC_PC(isp, chan)->gone_device_time, 0, "Gone Device Time");
+		SYSCTL_ADD_QUAD(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
+		    "wwnn", CTLFLAG_RD, &fcp->isp_wwnn,
+		    "World Wide Node Name");
+		SYSCTL_ADD_QUAD(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
+		    "wwpn", CTLFLAG_RD, &fcp->isp_wwpn,
+		    "World Wide Port Name");
+		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
+		    "loop_down_limit", CTLFLAG_RW, &fc->loop_down_limit, 0,
+		    "Loop Down Limit");
+		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
+		    "gone_device_time", CTLFLAG_RW, &fc->gone_device_time, 0,
+		    "Gone Device Time");
 #if defined(ISP_TARGET_MODE) && defined(DEBUG)
-		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO, "inject_lost_data_frame", CTLFLAG_RW, &ISP_FC_PC(isp, chan)->inject_lost_data_frame, 0, "Cause a Lost Frame on a Read");
+		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
+		    "inject_lost_data_frame", CTLFLAG_RW, &fc->inject_lost_data_frame, 0,
+		    "Cause a Lost Frame on a Read");
 #endif
 		SYSCTL_ADD_PROC(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
 		    "role", CTLTYPE_INT | CTLFLAG_RW, isp, chan,
 		    isp_role_sysctl, "I", "Current role");
+		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
+		    "speed", CTLFLAG_RD, &fcp->isp_gbspeed, 0,
+		    "Connection speed in gigabits");
+		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
+		    "linkstate", CTLFLAG_RD, &fcp->isp_linkstate, 0,
+		    "Link state");
+		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
+		    "fwstate", CTLFLAG_RD, &fcp->isp_fwstate, 0,
+		    "Firmware state");
+		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
+		    "loopstate", CTLFLAG_RD, &fcp->isp_loopstate, 0,
+		    "Loop state");
+		SYSCTL_ADD_UINT(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
+		    "topo", CTLFLAG_RD, &fcp->isp_topo, 0,
+		    "Connection topology");
 	}
 	return (0);
 }
@@ -393,6 +417,9 @@ isp_freeze_loopdown(ispsoftc_t *isp, int chan, char *msg)
 		if (fc->simqfrozen == 0) {
 			isp_prt(isp, ISP_LOGDEBUG0, "%s: freeze simq (loopdown) chan %d", msg, chan);
 			fc->simqfrozen = SIMQFRZ_LOOPDOWN;
+#if __FreeBSD_version >= 1000039
+			xpt_hold_boot();
+#endif
 			xpt_freeze_simq(fc->sim, 1);
 		} else {
 			isp_prt(isp, ISP_LOGDEBUG0, "%s: mark frozen (loopdown) chan %d", msg, chan);
@@ -411,6 +438,9 @@ isp_unfreeze_loopdown(ispsoftc_t *isp, int chan)
 		if (wasfrozen && fc->simqfrozen == 0) {
 			isp_prt(isp, ISP_LOG_SANCFG|ISP_LOGDEBUG0, "%s: Chan %d releasing simq", __func__, chan);
 			xpt_release_simq(fc->sim, 1);
+#if __FreeBSD_version >= 1000039
+			xpt_release_boot();
+#endif
 		}
 	}
 }
@@ -2450,12 +2480,13 @@ isp_handle_platform_atio2(ispsoftc_t *isp, at2_entry_t *aep)
 	else {
 		if ((isp_find_pdb_by_handle(isp, 0, nphdl, &lp) == 0 ||
 		     lp->state == FC_PORTDB_STATE_ZOMBIE)) {
-			uint64_t iid =
+			uint64_t wwpn =
 				(((uint64_t) aep->at_wwpn[0]) << 48) |
 				(((uint64_t) aep->at_wwpn[1]) << 32) |
 				(((uint64_t) aep->at_wwpn[2]) << 16) |
 				(((uint64_t) aep->at_wwpn[3]) <<  0);
-			isp_add_wwn_entry(isp, 0, iid, nphdl, PORT_ANY, 0);
+			isp_add_wwn_entry(isp, 0, wwpn, INI_NONE,
+			    nphdl, PORT_ANY, 0);
 			isp_find_pdb_by_handle(isp, 0, nphdl, &lp);
 		}
 		atiop->init_id = FC_PORTDB_TGT(isp, 0, lp);
@@ -3165,8 +3196,9 @@ isp_handle_platform_notify_24xx(ispsoftc_t *isp, in_fcentry_24xx_t *inot)
 	uint16_t prli_options = 0;
 	uint32_t portid;
 	fcportdb_t *lp;
-	uint8_t *ptr = NULL;
-	uint64_t wwn;
+	char *msg = NULL;
+	uint8_t *ptr = (uint8_t *)inot;
+	uint64_t wwpn = INI_NONE, wwnn = INI_NONE;
 
 	nphdl = inot->in_nphdl;
 	if (nphdl != NIL_HANDLE) {
@@ -3178,7 +3210,7 @@ isp_handle_platform_notify_24xx(ispsoftc_t *isp, in_fcentry_24xx_t *inot)
 	switch (inot->in_status) {
 	case IN24XX_ELS_RCVD:
 	{
-		char buf[16], *msg;
+		char buf[16];
 		int chan = ISP_GET_VPIDX(isp, inot->in_vpidx);
 
 		/*
@@ -3189,49 +3221,27 @@ isp_handle_platform_notify_24xx(ispsoftc_t *isp, in_fcentry_24xx_t *inot)
 		switch (inot->in_status_subcode) {
 		case LOGO:
 			msg = "LOGO";
-			if (ISP_FW_NEWER_THAN(isp, 4, 0, 25)) {
-				ptr = (uint8_t *)inot;  /* point to unswizzled entry! */
-				wwn =	(((uint64_t) ptr[IN24XX_LOGO_WWPN_OFF])   << 56) |
-					(((uint64_t) ptr[IN24XX_LOGO_WWPN_OFF+1]) << 48) |
-					(((uint64_t) ptr[IN24XX_LOGO_WWPN_OFF+2]) << 40) |
-					(((uint64_t) ptr[IN24XX_LOGO_WWPN_OFF+3]) << 32) |
-					(((uint64_t) ptr[IN24XX_LOGO_WWPN_OFF+4]) << 24) |
-					(((uint64_t) ptr[IN24XX_LOGO_WWPN_OFF+5]) << 16) |
-					(((uint64_t) ptr[IN24XX_LOGO_WWPN_OFF+6]) <<  8) |
-					(((uint64_t) ptr[IN24XX_LOGO_WWPN_OFF+7]));
-			} else {
-				wwn = INI_ANY;
-			}
-			isp_del_wwn_entry(isp, chan, wwn, nphdl, portid);
+			wwpn = be64dec(&ptr[IN24XX_PLOGI_WWPN_OFF]);
+			isp_del_wwn_entry(isp, chan, wwpn, nphdl, portid);
 			break;
 		case PRLO:
 			msg = "PRLO";
 			break;
 		case PLOGI:
+			msg = "PLOGI";
+			wwnn = be64dec(&ptr[IN24XX_PLOGI_WWNN_OFF]);
+			wwpn = be64dec(&ptr[IN24XX_PLOGI_WWPN_OFF]);
+			isp_add_wwn_entry(isp, chan, wwpn, wwnn,
+			    nphdl, portid, prli_options);
+			break;
 		case PRLI:
-			/*
-			 * Treat PRLI the same as PLOGI and make a database entry for it.
-			 */
-			if (inot->in_status_subcode == PLOGI) {
-				msg = "PLOGI";
-			} else {
-				prli_options = inot->in_prli_options;
-				msg = "PRLI";
-			}
-			if (ISP_FW_NEWER_THAN(isp, 4, 0, 25)) {
-				ptr = (uint8_t *)inot;  /* point to unswizzled entry! */
-				wwn =	(((uint64_t) ptr[IN24XX_PLOGI_WWPN_OFF])   << 56) |
-					(((uint64_t) ptr[IN24XX_PLOGI_WWPN_OFF+1]) << 48) |
-					(((uint64_t) ptr[IN24XX_PLOGI_WWPN_OFF+2]) << 40) |
-					(((uint64_t) ptr[IN24XX_PLOGI_WWPN_OFF+3]) << 32) |
-					(((uint64_t) ptr[IN24XX_PLOGI_WWPN_OFF+4]) << 24) |
-					(((uint64_t) ptr[IN24XX_PLOGI_WWPN_OFF+5]) << 16) |
-					(((uint64_t) ptr[IN24XX_PLOGI_WWPN_OFF+6]) <<  8) |
-					(((uint64_t) ptr[IN24XX_PLOGI_WWPN_OFF+7]));
-			} else {
-				wwn = INI_NONE;
-			}
-			isp_add_wwn_entry(isp, chan, wwn, nphdl, portid, prli_options);
+			msg = "PRLI";
+			prli_options = inot->in_prli_options;
+			if (inot->in_flags & IN24XX_FLAG_PN_NN_VALID)
+				wwnn = be64dec(&ptr[IN24XX_PRLI_WWNN_OFF]);
+			wwpn = be64dec(&ptr[IN24XX_PRLI_WWPN_OFF]);
+			isp_add_wwn_entry(isp, chan, wwpn, wwnn,
+			    nphdl, portid, prli_options);
 			break;
 		case PDISC:
 			msg = "PDISC";
@@ -3255,21 +3265,19 @@ isp_handle_platform_notify_24xx(ispsoftc_t *isp, in_fcentry_24xx_t *inot)
 	}
 
 	case IN24XX_PORT_LOGOUT:
-		ptr = "PORT LOGOUT";
+		msg = "PORT LOGOUT";
 		if (isp_find_pdb_by_handle(isp, ISP_GET_VPIDX(isp, inot->in_vpidx), nphdl, &lp)) {
 			isp_del_wwn_entry(isp, ISP_GET_VPIDX(isp, inot->in_vpidx), lp->port_wwn, nphdl, lp->portid);
 		}
 		/* FALLTHROUGH */
 	case IN24XX_PORT_CHANGED:
-		if (ptr == NULL) {
-			ptr = "PORT CHANGED";
-		}
+		if (msg == NULL)
+			msg = "PORT CHANGED";
 		/* FALLTHROUGH */
-	case IN24XX_LIP_RESET: 
-		if (ptr == NULL) {
-			ptr = "LIP RESET";
-		}
-		isp_prt(isp, ISP_LOGINFO, "Chan %d %s (sub-status 0x%x) for N-port handle 0x%x", ISP_GET_VPIDX(isp, inot->in_vpidx), ptr, inot->in_status_subcode, nphdl);
+	case IN24XX_LIP_RESET:
+		if (msg == NULL)
+			msg = "LIP RESET";
+		isp_prt(isp, ISP_LOGINFO, "Chan %d %s (sub-status 0x%x) for N-port handle 0x%x", ISP_GET_VPIDX(isp, inot->in_vpidx), msg, inot->in_status_subcode, nphdl);
 
 		/*
 		 * All subcodes here are irrelevant. What is relevant
@@ -3285,21 +3293,18 @@ isp_handle_platform_notify_24xx(ispsoftc_t *isp, in_fcentry_24xx_t *inot)
 		isp_handle_srr_notify(isp, inot);
 		break;
 #else
-		if (ptr == NULL) {
-			ptr = "SRR RCVD";
-		}
+		if (msg == NULL)
+			msg = "SRR RCVD";
 		/* FALLTHROUGH */
 #endif
 	case IN24XX_LINK_RESET:
-		if (ptr == NULL) {
-			ptr = "LINK RESET";
-		}
+		if (msg == NULL)
+			msg = "LINK RESET";
 	case IN24XX_LINK_FAILED:
-		if (ptr == NULL) {
-			ptr = "LINK FAILED";
-		}
+		if (msg == NULL)
+			msg = "LINK FAILED";
 	default:
-		isp_prt(isp, ISP_LOGWARN, "Chan %d %s", ISP_GET_VPIDX(isp, inot->in_vpidx), ptr);
+		isp_prt(isp, ISP_LOGWARN, "Chan %d %s", ISP_GET_VPIDX(isp, inot->in_vpidx), msg);
 		isp_async(isp, ISPASYNC_TARGET_NOTIFY_ACK, inot);
 		break;
 	}
@@ -3478,6 +3483,12 @@ isp_handle_platform_target_tmf(ispsoftc_t *isp, isp_notify_t *notify)
 		break;
 	case NT_TARGET_RESET:
 		inot->arg = MSG_TARGET_RESET;
+		break;
+	case NT_QUERY_TASK_SET:
+		inot->arg = MSG_QUERY_TASK_SET;
+		break;
+	case NT_QUERY_ASYNC_EVENT:
+		inot->arg = MSG_QUERY_ASYNC_EVENT;
 		break;
 	default:
 		isp_prt(isp, ISP_LOGWARN, "%s: unknown TMF code 0x%x for chan %d lun %#jx", __func__, notify->nt_ncode, notify->nt_channel, (uintmax_t)lun);
@@ -4489,12 +4500,10 @@ static void
 isp_poll(struct cam_sim *sim)
 {
 	ispsoftc_t *isp = cam_sim_softc(sim);
-	uint32_t isr;
-	uint16_t sema, mbox;
+	uint16_t isr, sema, info;
 
-	if (ISP_READ_ISR(isp, &isr, &sema, &mbox)) {
-		isp_intr(isp, isr, sema, mbox);
-	}
+	if (ISP_READ_ISR(isp, &isr, &sema, &info))
+		isp_intr(isp, isr, sema, info);
 }
 
 
@@ -4513,11 +4522,9 @@ isp_watchdog(void *arg)
 	 * Hand crank the interrupt code just to be sure the command isn't stuck somewhere.
 	 */
 	if (handle != ISP_HANDLE_FREE) {
-		uint32_t isr;
-		uint16_t sema, mbox;
-		if (ISP_READ_ISR(isp, &isr, &sema, &mbox) != 0) {
-			isp_intr(isp, isr, sema, mbox);
-		}
+		uint16_t isr, sema, info;
+		if (ISP_READ_ISR(isp, &isr, &sema, &info) != 0)
+			isp_intr(isp, isr, sema, info);
 		ohandle = handle;
 		handle = isp_find_handle(isp, xs);
 	}
@@ -4575,10 +4582,6 @@ isp_make_here(ispsoftc_t *isp, fcportdb_t *fcp, int chan, int tgt)
 	union ccb *ccb;
 	struct isp_fc *fc = ISP_FC_PC(isp, chan);
 
-	if (isp_autoconfig == 0) {
-		return;
-	}
-
 	/*
 	 * Allocate a CCB, create a wildcard path for this target and schedule a rescan.
 	 */
@@ -4602,9 +4605,6 @@ isp_make_gone(ispsoftc_t *isp, fcportdb_t *fcp, int chan, int tgt)
 	struct cam_path *tp;
 	struct isp_fc *fc = ISP_FC_PC(isp, chan);
 
-	if (isp_autoconfig == 0) {
-		return;
-	}
 	if (xpt_create_path(&tp, NULL, cam_sim_path(fc->sim), tgt, CAM_LUN_WILDCARD) == CAM_REQ_CMP) {
 		xpt_async(AC_LOST_DEVICE, tp, NULL);
 		xpt_free_path(tp);
@@ -5489,6 +5489,9 @@ isp_action(struct cam_sim *sim, union ccb *ccb)
 			fcparam *fcp = FCPARAM(isp, bus);
 
 			cpi->hba_misc = PIM_NOBUSRESET | PIM_UNMAPPED;
+#if __FreeBSD_version >= 1000039
+			cpi->hba_misc |= PIM_NOSCAN;
+#endif
 
 			/*
 			 * Because our loop ID can shift from time to time,
@@ -5676,25 +5679,22 @@ isp_async(ispsoftc_t *isp, ispasync_t cmd, ...)
 		break;
 	}
 	case ISPASYNC_LIP:
-		if (msg == NULL) {
+		if (msg == NULL)
 			msg = "LIP Received";
-		}
 		/* FALLTHROUGH */
 	case ISPASYNC_LOOP_RESET:
-		if (msg == NULL) {
+		if (msg == NULL)
 			msg = "LOOP Reset";
-		}
 		/* FALLTHROUGH */
 	case ISPASYNC_LOOP_DOWN:
 	{
-		if (msg == NULL) {
+		if (msg == NULL)
 			msg = "LOOP Down";
-		}
 		va_start(ap, cmd);
 		bus = va_arg(ap, int);
 		va_end(ap);
 
-		FCPARAM(isp, bus)->link_active = 0;
+		FCPARAM(isp, bus)->isp_linkstate = 0;
 
 		fc = ISP_FC_PC(isp, bus);
 		if (cmd == ISPASYNC_LOOP_DOWN && fc->ready) {
@@ -5727,7 +5727,7 @@ isp_async(ispsoftc_t *isp, ispasync_t cmd, ...)
 		 * Change Notify before activating the FC cleanup
 		 * thread to look at the state of the loop again.
 		 */
-		FCPARAM(isp, bus)->link_active = 1;
+		FCPARAM(isp, bus)->isp_linkstate = 1;
 		fc->loop_dead = 0;
 		fc->loop_down_time = 0;
 		isp_prt(isp, ISP_LOGINFO, "Chan %d Loop UP", bus);
@@ -5883,6 +5883,8 @@ changed:
 		case NT_CLEAR_TASK_SET:
 		case NT_LUN_RESET:
 		case NT_TARGET_RESET:
+		case NT_QUERY_TASK_SET:
+		case NT_QUERY_ASYNC_EVENT:
 			/*
 			 * These are task management functions.
 			 */
@@ -6244,13 +6246,12 @@ isp_mbox_wait_complete(ispsoftc_t *isp, mbreg_t *mbp)
 	} else {
 		for (olim = 0; olim < max; olim++) {
 			for (ilim = 0; ilim < usecs; ilim += 100) {
-				uint32_t isr;
-				uint16_t sema, mbox;
+				uint16_t isr, sema, info;
 				if (isp->isp_osinfo.mboxcmd_done) {
 					break;
 				}
-				if (ISP_READ_ISR(isp, &isr, &sema, &mbox)) {
-					isp_intr(isp, isr, sema, mbox);
+				if (ISP_READ_ISR(isp, &isr, &sema, &info)) {
+					isp_intr(isp, isr, sema, info);
 					if (isp->isp_osinfo.mboxcmd_done) {
 						break;
 					}
@@ -6318,16 +6319,14 @@ void
 isp_platform_intr(void *arg)
 {
 	ispsoftc_t *isp = arg;
-	uint32_t isr;
-	uint16_t sema, mbox;
+	uint16_t isr, sema, info;
 
 	ISP_LOCK(isp);
 	isp->isp_intcnt++;
-	if (ISP_READ_ISR(isp, &isr, &sema, &mbox) == 0) {
+	if (ISP_READ_ISR(isp, &isr, &sema, &info))
+		isp_intr(isp, isr, sema, info);
+	else
 		isp->isp_intbogus++;
-	} else {
-		isp_intr(isp, isr, sema, mbox);
-	}
 	ISP_UNLOCK(isp);
 }
 

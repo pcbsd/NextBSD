@@ -56,6 +56,7 @@ static int ioat_detach(device_t device);
 static int ioat_setup_intr(struct ioat_softc *ioat);
 static int ioat_teardown_intr(struct ioat_softc *ioat);
 static int ioat3_attach(device_t device);
+static int ioat3_selftest(struct ioat_softc *ioat);
 static int ioat_map_pci_bar(struct ioat_softc *ioat);
 static void ioat_dmamap_cb(void *arg, bus_dma_segment_t *segs, int nseg,
     int error);
@@ -79,6 +80,12 @@ static void ioat_comp_update_map(void *arg, bus_dma_segment_t *seg, int nseg,
 static int ioat_reset_hw(struct ioat_softc *ioat);
 static void ioat_setup_sysctl(device_t device);
 
+#define	ioat_log_message(v, ...) do {					\
+	if ((v) <= g_ioat_debug_level) {				\
+		device_printf(ioat->device, __VA_ARGS__);		\
+	}								\
+} while (0)
+
 MALLOC_DEFINE(M_IOAT, "ioat", "ioat driver memory allocations");
 SYSCTL_NODE(_hw, OID_AUTO, ioat, CTLFLAG_RD, 0, "ioat node");
 
@@ -86,7 +93,7 @@ static int g_force_legacy_interrupts;
 SYSCTL_INT(_hw_ioat, OID_AUTO, force_legacy_interrupts, CTLFLAG_RDTUN,
     &g_force_legacy_interrupts, 0, "Set to non-zero to force MSI-X disabled");
 
-static int g_ioat_debug_level = 0;
+int g_ioat_debug_level = 0;
 SYSCTL_INT(_hw_ioat, OID_AUTO, debug_level, CTLFLAG_RWTUN, &g_ioat_debug_level,
     0, "Set log level (0-3) for ioat(4). Higher is more verbose.");
 
@@ -239,7 +246,15 @@ ioat_attach(device_t device)
 	if (error != 0)
 		goto err;
 
+	error = ioat3_selftest(ioat);
+	if (error != 0)
+		return (error);
+
+	ioat_process_events(ioat);
+	ioat_setup_sysctl(device);
+
 	ioat_channel[ioat_channel_index++] = ioat;
+	ioat_test_attach();
 
 err:
 	if (error != 0)
@@ -254,6 +269,8 @@ ioat_detach(device_t device)
 	uint32_t i;
 
 	ioat = DEVICE2SOFTC(device);
+
+	ioat_test_detach();
 	callout_drain(&ioat->timer);
 
 	pci_disable_busmaster(device);
@@ -341,16 +358,13 @@ ioat3_attach(device_t device)
 	capabilities = ioat_read_dmacapability(ioat);
 
 	xfercap = ioat_read_xfercap(ioat);
-
-	/* Only bits [4:0] are valid. */
-	xfercap &= 0x1f;
 	ioat->max_xfer_size = 1 << xfercap;
 
 	/* TODO: need to check DCA here if we ever do XOR/PQ */
 
 	mtx_init(&ioat->submit_lock, "ioat_submit", NULL, MTX_DEF);
 	mtx_init(&ioat->cleanup_lock, "ioat_process_events", NULL, MTX_DEF);
-	callout_init(&ioat->timer, CALLOUT_MPSAFE);
+	callout_init(&ioat->timer, 1);
 
 	ioat->is_resize_pending = FALSE;
 	ioat->is_completion_pending = FALSE;
@@ -418,13 +432,6 @@ ioat3_attach(device_t device)
 	ioat_write_chanctrl(ioat, IOAT_CHANCTRL_RUN);
 	ioat_write_chancmp(ioat, ioat->comp_update_bus_addr);
 	ioat_write_chainaddr(ioat, ring[0]->hw_desc_bus_addr);
-
-	error = ioat3_selftest(ioat);
-	if (error != 0)
-		return (error);
-
-	ioat_process_events(ioat);
-	ioat_setup_sysctl(device);
 	return (0);
 }
 
@@ -613,8 +620,8 @@ ioat_release(bus_dmaengine_t dmaengine)
 {
 	struct ioat_softc *ioat;
 
-	ioat_log_message(3, "%s\n", __func__);
 	ioat = to_ioat_softc(dmaengine);
+	ioat_log_message(3, "%s\n", __func__);
 	ioat_write_2(ioat, IOAT_DMACOUNT_OFFSET, (uint16_t)ioat->head);
 	mtx_unlock(&ioat->submit_lock);
 }
@@ -1033,22 +1040,4 @@ ioat_setup_sysctl(device_t device)
 	SYSCTL_ADD_UINT(sysctl_ctx, SYSCTL_CHILDREN(sysctl_tree), OID_AUTO,
 	    "tail", CTLFLAG_RD, &ioat->tail,
 	    0, "HW descriptor tail pointer index");
-}
-
-void
-ioat_log_message(int verbosity, char *fmt, ...)
-{
-	va_list argp;
-	char buffer[512];
-	struct timeval tv;
-
-	if (verbosity > g_ioat_debug_level)
-		return;
-
-	va_start(argp, fmt);
-	vsnprintf(buffer, sizeof(buffer) - 1, fmt, argp);
-	va_end(argp);
-	microuptime(&tv);
-
-	printf("[%d:%06d] ioat: %s", (int)tv.tv_sec, (int)tv.tv_usec, buffer);
 }

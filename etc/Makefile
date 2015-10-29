@@ -146,6 +146,9 @@ BIN1+= regdomain.xml
 BIN2=	bootstrap netstart pccard_ether rc.suspend rc.resume
 
 MTREE=	BSD.debug.dist BSD.include.dist BSD.root.dist BSD.usr.dist BSD.var.dist
+.if ${MK_LIB32} != "no"
+MTREE+=	BSD.lib32.dist
+.endif
 .if ${MK_TESTS} != "no"
 MTREE+=	BSD.tests.dist
 .endif
@@ -231,11 +234,11 @@ distribution:
 .endif
 	${_+_}cd ${.CURDIR}/defaults; ${MAKE} install
 	${_+_}cd ${.CURDIR}/devd; ${MAKE} install
-.if ${MK_DMAGENT} != "no"
-	${_+_}cd ${.CURDIR}/dma; ${MAKE} install
-.endif
 	${_+_}cd ${.CURDIR}/gss; ${MAKE} install
 	${_+_}cd ${.CURDIR}/launchd.d; ${MAKE} install
+.if ${MK_NTP} != "no"
+	${_+_}cd ${.CURDIR}/ntp; ${MAKE} install
+.endif
 	${_+_}cd ${.CURDIR}/periodic; ${MAKE} install
 .if ${MK_PKGBOOTSTRAP} != "no"
 	${_+_}cd ${.CURDIR}/pkg; ${MAKE} install
@@ -284,10 +287,6 @@ distribution:
 .endif
 	cd ${.CURDIR}/mtree; ${INSTALL} -o ${BINOWN} -g ${BINGRP} -m 444 \
 	    ${MTREE} ${DESTDIR}/etc/mtree
-.if ${MK_PPP} != "no"
-	cd ${.CURDIR}/ppp; ${INSTALL} -o ${BINOWN} -g ${BINGRP} -m 600 \
-	    ${PPPCNF} ${DESTDIR}/etc/ppp
-.endif
 .if ${MK_MAIL} != "no"
 	cd ${.CURDIR}/mail; ${INSTALL} -o ${BINOWN} -g ${BINGRP} -m 644 \
 	    ${ETCMAIL} ${DESTDIR}/etc/mail
@@ -338,8 +337,13 @@ MTREES=		mtree/BSD.root.dist		/		\
 .if ${MK_GROFF} != "no"
 MTREES+=	mtree/BSD.groff.dist		/usr
 .endif
+.if ${MK_LIB32} != "no"
+MTREES+=	mtree/BSD.lib32.dist		/usr
+MTREES+=	mtree/BSD.lib32.dist		/usr/lib/debug/usr
+.endif
 .if ${MK_TESTS} != "no"
 MTREES+=	mtree/BSD.tests.dist		${TESTSBASE}
+MTREES+=	mtree/BSD.tests.dist		/usr/lib/debug/${TESTSBASE}
 .endif
 .for mtree in ${LOCAL_MTREE}
 MTREES+=	../${mtree}			/

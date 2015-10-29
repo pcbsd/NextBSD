@@ -98,7 +98,6 @@ SUBDIR=	\
 	${_dpt} \
 	${_drm} \
 	${_drm2} \
-	${_dtrace} \
 	dummynet \
 	${_ed} \
 	${_elink} \
@@ -203,7 +202,7 @@ SUBDIR=	\
 	${_linux} \
 	${_linux_common} \
 	${_linux64} \
-	${_linuxapi} \
+	${_linuxkpi} \
 	lmc \
 	lpt \
 	mac_biba \
@@ -269,7 +268,6 @@ SUBDIR=	\
 	${_nvme} \
 	${_nvram} \
 	${_nxge} \
-	${_opensolaris} \
 	oce \
 	otus \
 	otusfw \
@@ -395,11 +393,18 @@ SUBDIR=	\
 	${_x86bios} \
 	${_xe} \
 	xl \
-	${_zfs} \
 	zlib
 
 .if ${MK_AUTOFS} != "no" || defined(ALL_MODULES)
 _autofs=	autofs
+.endif
+
+.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
+.if ${MACHINE_CPUARCH} != "arm" && ${MACHINE_CPUARCH} != "mips" && \
+	${MACHINE_CPUARCH} != "sparc64"
+SUBDIR+=	dtrace
+.endif
+SUBDIR+=	opensolaris
 .endif
 
 .if ${MK_CRYPT} != "no" || defined(ALL_MODULES)
@@ -481,8 +486,12 @@ _txp=		txp
 #_cxgbe=		cxgbe
 .endif
 
-.if ${MACHINE_CPUARCH} != "arm" && ${MACHINE_CPUARCH} != "mips" && \
-	${MACHINE_CPUARCH} != "powerpc"
+.if ${MK_ZFS} != "no" || defined(ALL_MODULES)
+SUBDIR+=	zfs
+.endif
+
+.if ${MACHINE_CPUARCH} != "aarch64" && ${MACHINE_CPUARCH} != "arm" && \
+	${MACHINE_CPUARCH} != "mips" && ${MACHINE_CPUARCH} != "powerpc"
 _syscons=	syscons
 _vpo=		vpo
 .endif
@@ -511,9 +520,6 @@ _cs=		cs
 _dpms=		dpms
 _drm=		drm
 _drm2=		drm2
-.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
-_dtrace=	dtrace
-.endif
 _ed=		ed
 _em=		em
 _ep=		ep
@@ -537,12 +543,9 @@ _linprocfs=	linprocfs
 _linsysfs=	linsysfs
 _linux=		linux
 .if ${MK_OFED} != "no"
-_linuxapi=	linuxapi
+_linuxkpi=	linuxkpi
 .endif
 _ndis=		ndis
-.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
-_opensolaris=	opensolaris
-.endif
 _pccard=	pccard
 .if ${MK_OFED} != "no" || defined(ALL_MODULES)
 _rdma=		rdma
@@ -558,9 +561,6 @@ _vxge=  	vxge
 _wbwd=		wbwd
 _wi=		wi
 _xe=		xe
-.if ${MK_ZFS} != "no" || defined(ALL_MODULES)
-_zfs=		zfs
-.endif
 .if ${MACHINE} != "pc98"
 _aac=		aac
 _aacraid=	aacraid
@@ -636,7 +636,6 @@ _x86bios=	x86bios
 .endif
 
 .if ${MACHINE_CPUARCH} == "amd64"
-_cloudabi64=	cloudabi64
 _ioat=		ioat
 _ixl=		ixl
 _ixlv=		ixlv
@@ -720,23 +719,14 @@ _cbb=		cbb
 _cfi=		cfi
 _cpufreq=	cpufreq
 _drm=		drm
-.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
-_dtrace=	dtrace
-.endif
 _exca=		exca
 _nvram=		powermac_nvram
-.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
-_opensolaris=	opensolaris
-.endif
 _pccard=	pccard
 _wi=		wi
 .endif
 
 .if ${MACHINE_ARCH} == "powerpc64"
 _drm2=		drm2
-.if ${MK_ZFS} != "no" || defined(ALL_MODULES)
-_zfs=		zfs
-.endif
 .endif
 
 .if ${MACHINE_CPUARCH} == "sparc64"
@@ -744,12 +734,10 @@ _auxio=		auxio
 _em=		em
 _epic=		epic
 _igb=		igb
-.if ${MK_CDDL} != "no" || defined(ALL_MODULES)
-_opensolaris=	opensolaris
 .endif
-.if ${MK_ZFS} != "no" || defined(ALL_MODULES)
-_zfs=		zfs
-.endif
+
+.if ${MACHINE_CPUARCH} == "aarch64" || ${MACHINE_CPUARCH} == "amd64"
+_cloudabi64=	cloudabi64
 .endif
 
 .endif

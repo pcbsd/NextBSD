@@ -35,7 +35,7 @@ __FBSDID("$FreeBSD$");
 	ioat_read_1((ioat), IOAT_CHANCNT_OFFSET)
 
 #define	ioat_read_xfercap(ioat) \
-	ioat_read_1((ioat), IOAT_XFERCAP_OFFSET)
+	(ioat_read_1((ioat), IOAT_XFERCAP_OFFSET) & IOAT_XFERCAP_VALID_MASK)
 
 #define	ioat_write_intrctrl(ioat, value) \
 	ioat_write_1((ioat), IOAT_INTRCTRL_OFFSET, (value))
@@ -65,7 +65,7 @@ ioat_bus_space_write_8_lower_first(bus_space_tag_t tag,
 	bus_space_write_4(tag, handle, offset + 4, val >> 32);
 }
 
-#ifdef i386
+#ifdef __i386__
 #define ioat_bus_space_read_8 ioat_bus_space_read_8_lower_first
 #define ioat_bus_space_write_8 ioat_bus_space_write_8_lower_first
 #else
@@ -119,7 +119,7 @@ MALLOC_DECLARE(M_IOAT);
 
 SYSCTL_DECL(_hw_ioat);
 
-void ioat_log_message(int verbosity, char *fmt, ...);
+extern int g_ioat_debug_level;
 
 struct ioat_dma_hw_descriptor {
 	uint32_t size;
@@ -365,6 +365,9 @@ struct ioat_softc {
 
 	struct mtx		cleanup_lock;
 };
+
+void ioat_test_attach(void);
+void ioat_test_detach(void);
 
 static inline uint64_t
 ioat_get_chansts(struct ioat_softc *ioat)

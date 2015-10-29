@@ -76,6 +76,7 @@ __FBSDID("$FreeBSD$");
 #include <dev/usb/usb_debug.h>
 
 #include <dev/usb/wlan/if_urtwnreg.h>
+#include <dev/usb/wlan/if_urtwnvar.h>
 
 #ifdef USB_DEBUG
 static int urtwn_debug = 0;
@@ -85,7 +86,6 @@ SYSCTL_INT(_hw_usb_urtwn, OID_AUTO, debug, CTLFLAG_RWTUN, &urtwn_debug, 0,
     "Debug level");
 #endif
 
-#define	URTWN_RSSI(r)  (r) - 110
 #define	IEEE80211_HAS_ADDR4(wh)	IEEE80211_IS_DSTODS(wh)
 
 /* various supported device vendors/products */
@@ -188,10 +188,10 @@ static int		urtwn_alloc_list(struct urtwn_softc *,
 			    struct urtwn_data[], int, int);
 static int		urtwn_alloc_rx_list(struct urtwn_softc *);
 static int		urtwn_alloc_tx_list(struct urtwn_softc *);
-static void		urtwn_free_tx_list(struct urtwn_softc *);
-static void		urtwn_free_rx_list(struct urtwn_softc *);
 static void		urtwn_free_list(struct urtwn_softc *,
 			    struct urtwn_data data[], int);
+static void		urtwn_free_rx_list(struct urtwn_softc *);
+static void		urtwn_free_tx_list(struct urtwn_softc *);
 static struct urtwn_data *	_urtwn_getbuf(struct urtwn_softc *);
 static struct urtwn_data *	urtwn_getbuf(struct urtwn_softc *);
 static int		urtwn_write_region_1(struct urtwn_softc *, uint16_t,
@@ -222,6 +222,7 @@ static void		urtwn_r88e_read_rom(struct urtwn_softc *);
 static int		urtwn_ra_init(struct urtwn_softc *);
 static void		urtwn_tsf_sync_enable(struct urtwn_softc *);
 static void		urtwn_set_led(struct urtwn_softc *, int, int);
+static void		urtwn_set_mode(struct urtwn_softc *, uint8_t);
 static int		urtwn_newstate(struct ieee80211vap *,
 			    enum ieee80211_state, int);
 static void		urtwn_watchdog(void *);
@@ -265,10 +266,10 @@ static void		urtwn_set_txpower(struct urtwn_softc *,
 static void		urtwn_scan_start(struct ieee80211com *);
 static void		urtwn_scan_end(struct ieee80211com *);
 static void		urtwn_set_channel(struct ieee80211com *);
+static void		urtwn_update_mcast(struct ieee80211com *);
 static void		urtwn_set_chan(struct urtwn_softc *,
 		    	    struct ieee80211_channel *,
 			    struct ieee80211_channel *);
-static void		urtwn_update_mcast(struct ieee80211com *);
 static void		urtwn_iq_calib(struct urtwn_softc *);
 static void		urtwn_lc_calib(struct urtwn_softc *);
 static void		urtwn_init(struct urtwn_softc *);
@@ -470,20 +471,6 @@ detach:
 	return (ENXIO);			/* failure */
 }
 
-static void
-urtwn_drain_mbufq(struct urtwn_softc *sc)
-{
-	struct mbuf *m;
-	struct ieee80211_node *ni;
-	URTWN_ASSERT_LOCKED(sc);
-	while ((m = mbufq_dequeue(&sc->sc_snd)) != NULL) {
-		ni = (struct ieee80211_node *)m->m_pkthdr.rcvif;
-		m->m_pkthdr.rcvif = NULL;
-		ieee80211_free_node(ni);
-		m_freem(m);
-	}
-}
-
 static int
 urtwn_detach(device_t self)
 {
@@ -529,33 +516,16 @@ urtwn_detach(device_t self)
 }
 
 static void
-urtwn_free_tx_list(struct urtwn_softc *sc)
+urtwn_drain_mbufq(struct urtwn_softc *sc)
 {
-	urtwn_free_list(sc, sc->sc_tx, URTWN_TX_LIST_COUNT);
-}
-
-static void
-urtwn_free_rx_list(struct urtwn_softc *sc)
-{
-	urtwn_free_list(sc, sc->sc_rx, URTWN_RX_LIST_COUNT);
-}
-
-static void
-urtwn_free_list(struct urtwn_softc *sc, struct urtwn_data data[], int ndata)
-{
-	int i;
-
-	for (i = 0; i < ndata; i++) {
-		struct urtwn_data *dp = &data[i];
-
-		if (dp->buf != NULL) {
-			free(dp->buf, M_USBDEV);
-			dp->buf = NULL;
-		}
-		if (dp->ni != NULL) {
-			ieee80211_free_node(dp->ni);
-			dp->ni = NULL;
-		}
+	struct mbuf *m;
+	struct ieee80211_node *ni;
+	URTWN_ASSERT_LOCKED(sc);
+	while ((m = mbufq_dequeue(&sc->sc_snd)) != NULL) {
+		ni = (struct ieee80211_node *)m->m_pkthdr.rcvif;
+		m->m_pkthdr.rcvif = NULL;
+		ieee80211_free_node(ni);
+		m_freem(m);
 	}
 }
 
@@ -671,11 +641,6 @@ urtwn_rx_frame(struct urtwn_softc *sc, uint8_t *buf, int pktlen, int *rssi_p)
 			rssi = urtwn_get_rssi(sc, rate, &stat[1]);
 		/* Update our average RSSI. */
 		urtwn_update_avgrssi(sc, rate, rssi);
-		/*
-		 * Convert the RSSI to a range that will be accepted
-		 * by net80211.
-		 */
-		rssi = URTWN_RSSI(rssi);
 	}
 
 	m = m_getcl(M_NOWAIT, MT_DATA, M_PKTHDR);
@@ -695,27 +660,13 @@ urtwn_rx_frame(struct urtwn_softc *sc, uint8_t *buf, int pktlen, int *rssi_p)
 		tap->wr_flags = 0;
 		/* Map HW rate index to 802.11 rate. */
 		if (!(rxdw3 & R92C_RXDW3_HT)) {
-			switch (rate) {
-			/* CCK. */
-			case  0: tap->wr_rate =   2; break;
-			case  1: tap->wr_rate =   4; break;
-			case  2: tap->wr_rate =  11; break;
-			case  3: tap->wr_rate =  22; break;
-			/* OFDM. */
-			case  4: tap->wr_rate =  12; break;
-			case  5: tap->wr_rate =  18; break;
-			case  6: tap->wr_rate =  24; break;
-			case  7: tap->wr_rate =  36; break;
-			case  8: tap->wr_rate =  48; break;
-			case  9: tap->wr_rate =  72; break;
-			case 10: tap->wr_rate =  96; break;
-			case 11: tap->wr_rate = 108; break;
-			}
+			tap->wr_rate = ridx2rate[rate];
 		} else if (rate >= 12) {	/* MCS0~15. */
 			/* Bit 7 set means HT MCS instead of rate. */
 			tap->wr_rate = 0x80 | (rate - 12);
 		}
 		tap->wr_dbm_antsignal = rssi;
+		tap->wr_dbm_antnoise = URTWN_NOISE_FLOOR;
 		tap->wr_chan_freq = htole16(ic->ic_curchan->ic_freq);
 		tap->wr_chan_flags = htole16(ic->ic_curchan->ic_flags);
 	}
@@ -837,10 +788,12 @@ tr_setup:
 			    (struct ieee80211_frame_min *)wh);
 			nf = URTWN_NOISE_FLOOR;
 			if (ni != NULL) {
-				(void)ieee80211_input(ni, m, rssi, nf);
+				(void)ieee80211_input(ni, m, rssi - nf, nf);
 				ieee80211_free_node(ni);
-			} else
-				(void)ieee80211_input_all(ic, m, rssi, nf);
+			} else {
+				(void)ieee80211_input_all(ic, m, rssi - nf,
+				    nf);
+			}
 			m = next;
 		}
 		URTWN_LOCK(sc);
@@ -872,6 +825,102 @@ urtwn_txeof(struct usb_xfer *xfer, struct urtwn_data *data)
 	data->ni = NULL;
 	data->m = NULL;
 	sc->sc_txtimer = 0;
+}
+
+static int
+urtwn_alloc_list(struct urtwn_softc *sc, struct urtwn_data data[],
+    int ndata, int maxsz)
+{
+	int i, error;
+
+	for (i = 0; i < ndata; i++) {
+		struct urtwn_data *dp = &data[i];
+		dp->sc = sc;
+		dp->m = NULL;
+		dp->buf = malloc(maxsz, M_USBDEV, M_NOWAIT);
+		if (dp->buf == NULL) {
+			device_printf(sc->sc_dev,
+			    "could not allocate buffer\n");
+			error = ENOMEM;
+			goto fail;
+		}
+		dp->ni = NULL;
+	}
+
+	return (0);
+fail:
+	urtwn_free_list(sc, data, ndata);
+	return (error);
+}
+
+static int
+urtwn_alloc_rx_list(struct urtwn_softc *sc)
+{
+        int error, i;
+
+	error = urtwn_alloc_list(sc, sc->sc_rx, URTWN_RX_LIST_COUNT,
+	    URTWN_RXBUFSZ);
+	if (error != 0)
+		return (error);
+
+	STAILQ_INIT(&sc->sc_rx_active);
+	STAILQ_INIT(&sc->sc_rx_inactive);
+
+	for (i = 0; i < URTWN_RX_LIST_COUNT; i++)
+		STAILQ_INSERT_HEAD(&sc->sc_rx_inactive, &sc->sc_rx[i], next);
+
+	return (0);
+}
+
+static int
+urtwn_alloc_tx_list(struct urtwn_softc *sc)
+{
+	int error, i;
+
+	error = urtwn_alloc_list(sc, sc->sc_tx, URTWN_TX_LIST_COUNT,
+	    URTWN_TXBUFSZ);
+	if (error != 0)
+		return (error);
+
+	STAILQ_INIT(&sc->sc_tx_active);
+	STAILQ_INIT(&sc->sc_tx_inactive);
+	STAILQ_INIT(&sc->sc_tx_pending);
+
+	for (i = 0; i < URTWN_TX_LIST_COUNT; i++)
+		STAILQ_INSERT_HEAD(&sc->sc_tx_inactive, &sc->sc_tx[i], next);
+
+	return (0);
+}
+
+static void
+urtwn_free_list(struct urtwn_softc *sc, struct urtwn_data data[], int ndata)
+{
+	int i;
+
+	for (i = 0; i < ndata; i++) {
+		struct urtwn_data *dp = &data[i];
+
+		if (dp->buf != NULL) {
+			free(dp->buf, M_USBDEV);
+			dp->buf = NULL;
+		}
+		if (dp->ni != NULL) {
+			ieee80211_free_node(dp->ni);
+			dp->ni = NULL;
+		}
+	}
+}
+
+static void
+urtwn_free_rx_list(struct urtwn_softc *sc)
+{
+	urtwn_free_list(sc, sc->sc_rx, URTWN_RX_LIST_COUNT);
+}
+
+static void
+urtwn_free_tx_list(struct urtwn_softc *sc)
+{
+	urtwn_free_list(sc, sc->sc_tx, URTWN_TX_LIST_COUNT);
 }
 
 static void
@@ -1345,8 +1394,6 @@ urtwn_r88e_read_rom(struct urtwn_softc *sc)
 static int
 urtwn_ra_init(struct urtwn_softc *sc)
 {
-	static const uint8_t map[] =
-	    { 2, 4, 11, 22, 12, 18, 24, 36, 48, 72, 96, 108 };
 	struct ieee80211com *ic = &sc->sc_ic;
 	struct ieee80211vap *vap = TAILQ_FIRST(&ic->ic_vaps);
 	struct ieee80211_node *ni;
@@ -1364,10 +1411,11 @@ urtwn_ra_init(struct urtwn_softc *sc)
 	maxrate = maxbasicrate = 0;
 	for (i = 0; i < rs->rs_nrates; i++) {
 		/* Convert 802.11 rate to HW rate index. */
-		for (j = 0; j < nitems(map); j++)
-			if ((rs->rs_rates[i] & IEEE80211_RATE_VAL) == map[j])
+		for (j = 0; j < nitems(ridx2rate); j++)
+			if ((rs->rs_rates[i] & IEEE80211_RATE_VAL) ==
+			    ridx2rate[j])
 				break;
-		if (j == nitems(map))	/* Unknown rate, skip. */
+		if (j == nitems(ridx2rate))	/* Unknown rate, skip. */
 			continue;
 		rates |= 1 << j;
 		if (j > maxrate)
@@ -1476,6 +1524,16 @@ urtwn_set_led(struct urtwn_softc *sc, int led, int on)
 	}
 }
 
+static void
+urtwn_set_mode(struct urtwn_softc *sc, uint8_t mode)
+{
+	uint8_t reg;
+
+	reg = urtwn_read_1(sc, R92C_MSR);
+	reg = (reg & ~R92C_MSR_MASK) | mode;
+	urtwn_write_1(sc, R92C_MSR, reg);
+}
+
 static int
 urtwn_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 {
@@ -1499,9 +1557,7 @@ urtwn_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 		urtwn_set_led(sc, URTWN_LED_LINK, 0);
 
 		/* Set media status to 'No Link'. */
-		reg = urtwn_read_4(sc, R92C_CR);
-		reg = RW(reg, R92C_CR_NETTYPE, R92C_CR_NETTYPE_NOLINK);
-		urtwn_write_4(sc, R92C_CR, reg);
+		urtwn_set_mode(sc, R92C_MSR_NOLINK);
 
 		/* Stop Rx of data frames. */
 		urtwn_write_2(sc, R92C_RXFLTMAP2, 0);
@@ -1566,6 +1622,19 @@ urtwn_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 			/* Enable Rx of data frames. */
 			urtwn_write_2(sc, R92C_RXFLTMAP2, 0xffff);
 
+			/* Enable Rx of ctrl frames. */
+			urtwn_write_2(sc, R92C_RXFLTMAP1, 0xffff);
+
+			/*
+			 * Accept data/control/management frames
+			 * from any BSSID.
+			 */
+			urtwn_write_4(sc, R92C_RCR,
+			    (urtwn_read_4(sc, R92C_RCR) & ~(R92C_RCR_APM |
+			    R92C_RCR_CBSSID_DATA | R92C_RCR_CBSSID_BCN)) |
+			    R92C_RCR_ADF | R92C_RCR_ACF | R92C_RCR_AMF |
+			    R92C_RCR_AAP);
+
 			/* Turn link LED on. */
 			urtwn_set_led(sc, URTWN_LED_LINK, 1);
 			break;
@@ -1573,9 +1642,7 @@ urtwn_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 
 		ni = ieee80211_ref_node(vap->iv_bss);
 		/* Set media status to 'Associated'. */
-		reg = urtwn_read_4(sc, R92C_CR);
-		reg = RW(reg, R92C_CR_NETTYPE, R92C_CR_NETTYPE_INFRA);
-		urtwn_write_4(sc, R92C_CR, reg);
+		urtwn_set_mode(sc, R92C_MSR_INFRA);
 
 		/* Set BSSID. */
 		urtwn_write_4(sc, R92C_BSSID + 0, LE_READ_4(&ni->ni_bssid[0]));
@@ -1661,7 +1728,7 @@ urtwn_update_avgrssi(struct urtwn_softc *sc, int rate, int8_t rssi)
 	else
 		pwdb = 100 + rssi;
 	if (!(sc->chip & URTWN_CHIP_88E)) {
-		if (rate <= 3) {
+		if (rate <= URTWN_RIDX_CCK11) {
 			/* CCK gain is smaller than OFDM/MCS gain. */
 			pwdb += 6;
 			if (pwdb > 100)
@@ -1694,7 +1761,7 @@ urtwn_get_rssi(struct urtwn_softc *sc, int rate, void *physt)
 	uint8_t rpt;
 	int8_t rssi;
 
-	if (rate <= 3) {
+	if (rate <= URTWN_RIDX_CCK11) {
 		cck = (struct r92c_rx_cck *)physt;
 		if (sc->sc_flags & URTWN_FLAG_CCK_HIPWR) {
 			rpt = (cck->agc_rpt >> 5) & 0x3;
@@ -1720,7 +1787,7 @@ urtwn_r88e_get_rssi(struct urtwn_softc *sc, int rate, void *physt)
 	int8_t rssi;
 
 	rssi = 0;
-	if (rate <= 3) {
+	if (rate <= URTWN_RIDX_CCK11) {
 		cck = (struct r88e_rx_cck *)physt;
 		cck_agc_rpt = cck->agc_rpt;
 		lna_idx = (cck_agc_rpt & 0xe0) >> 5;
@@ -1761,7 +1828,6 @@ urtwn_r88e_get_rssi(struct urtwn_softc *sc, int rate, void *physt)
 	}
 	return (rssi);
 }
-
 
 static int
 urtwn_tx_start(struct urtwn_softc *sc, struct ieee80211_node *ni,
@@ -1854,10 +1920,12 @@ urtwn_tx_start(struct urtwn_softc *sc, struct ieee80211_node *ni,
 			}
 		}
 		/* Send RTS at OFDM24. */
-		txd->txdw4 |= htole32(SM(R92C_TXDW4_RTSRATE, 8));
+		txd->txdw4 |= htole32(SM(R92C_TXDW4_RTSRATE,
+		    URTWN_RIDX_OFDM24));
 		txd->txdw5 |= htole32(0x0001ff00);
 		/* Send data at OFDM54. */
-		txd->txdw5 |= htole32(SM(R92C_TXDW5_DATARATE, 11));
+		txd->txdw5 |= htole32(SM(R92C_TXDW5_DATARATE,
+		    URTWN_RIDX_OFDM54));
 	} else {
 		txd->txdw1 |= htole32(
 		    SM(R92C_TXDW1_MACID, 0) |
@@ -1866,7 +1934,8 @@ urtwn_tx_start(struct urtwn_softc *sc, struct ieee80211_node *ni,
 
 		/* Force CCK1. */
 		txd->txdw4 |= htole32(R92C_TXDW4_DRVRATE);
-		txd->txdw5 |= htole32(SM(R92C_TXDW5_DATARATE, 0));
+		txd->txdw5 |= htole32(SM(R92C_TXDW5_DATARATE,
+		    URTWN_RIDX_CCK1));
 	}
 	/* Set sequence number (already little endian). */
 	txd->txdseq |= *(uint16_t *)wh->i_seq;
@@ -1978,71 +2047,6 @@ urtwn_parent(struct ieee80211com *ic)
 
 	if (startall)
 		ieee80211_start_all(ic);
-}
-
-static int
-urtwn_alloc_list(struct urtwn_softc *sc, struct urtwn_data data[],
-    int ndata, int maxsz)
-{
-	int i, error;
-
-	for (i = 0; i < ndata; i++) {
-		struct urtwn_data *dp = &data[i];
-		dp->sc = sc;
-		dp->m = NULL;
-		dp->buf = malloc(maxsz, M_USBDEV, M_NOWAIT);
-		if (dp->buf == NULL) {
-			device_printf(sc->sc_dev,
-			    "could not allocate buffer\n");
-			error = ENOMEM;
-			goto fail;
-		}
-		dp->ni = NULL;
-	}
-
-	return (0);
-fail:
-	urtwn_free_list(sc, data, ndata);
-	return (error);
-}
-
-static int
-urtwn_alloc_rx_list(struct urtwn_softc *sc)
-{
-        int error, i;
-
-	error = urtwn_alloc_list(sc, sc->sc_rx, URTWN_RX_LIST_COUNT,
-	    URTWN_RXBUFSZ);
-	if (error != 0)
-		return (error);
-
-	STAILQ_INIT(&sc->sc_rx_active);
-	STAILQ_INIT(&sc->sc_rx_inactive);
-
-	for (i = 0; i < URTWN_RX_LIST_COUNT; i++)
-		STAILQ_INSERT_HEAD(&sc->sc_rx_inactive, &sc->sc_rx[i], next);
-
-	return (0);
-}
-
-static int
-urtwn_alloc_tx_list(struct urtwn_softc *sc)
-{
-	int error, i;
-
-	error = urtwn_alloc_list(sc, sc->sc_tx, URTWN_TX_LIST_COUNT,
-	    URTWN_TXBUFSZ);
-	if (error != 0)
-		return (error);
-
-	STAILQ_INIT(&sc->sc_tx_active);
-	STAILQ_INIT(&sc->sc_tx_inactive);
-	STAILQ_INIT(&sc->sc_tx_pending);
-
-	for (i = 0; i < URTWN_TX_LIST_COUNT; i++)
-		STAILQ_INSERT_HEAD(&sc->sc_tx_inactive, &sc->sc_tx[i], next);
-
-	return (0);
 }
 
 static __inline int
@@ -2685,7 +2689,7 @@ urtwn_bb_init(struct urtwn_softc *sc)
 	}
 }
 
-void
+static void
 urtwn_rf_init(struct urtwn_softc *sc)
 {
 	const struct urtwn_rf_prog *prog;
@@ -2826,7 +2830,7 @@ urtwn_edca_init(struct urtwn_softc *sc)
 	urtwn_write_4(sc, R92C_EDCA_VO_PARAM, 0x002fa226);
 }
 
-void
+static void
 urtwn_write_txpower(struct urtwn_softc *sc, int chain,
     uint16_t power[URTWN_RIDX_COUNT])
 {
@@ -2886,7 +2890,7 @@ urtwn_write_txpower(struct urtwn_softc *sc, int chain,
 	    SM(R92C_TXAGC_MCS15,  power[27]));
 }
 
-void
+static void
 urtwn_get_txpower(struct urtwn_softc *sc, int chain,
     struct ieee80211_channel *c, struct ieee80211_channel *extc,
     uint16_t power[URTWN_RIDX_COUNT])
@@ -2917,10 +2921,10 @@ urtwn_get_txpower(struct urtwn_softc *sc, int chain,
 
 	memset(power, 0, URTWN_RIDX_COUNT * sizeof(power[0]));
 	if (sc->regulatory == 0) {
-		for (ridx = 0; ridx <= 3; ridx++)
+		for (ridx = URTWN_RIDX_CCK1; ridx <= URTWN_RIDX_CCK11; ridx++)
 			power[ridx] = base->pwr[0][ridx];
 	}
-	for (ridx = 4; ridx < URTWN_RIDX_COUNT; ridx++) {
+	for (ridx = URTWN_RIDX_OFDM6; ridx < URTWN_RIDX_COUNT; ridx++) {
 		if (sc->regulatory == 3) {
 			power[ridx] = base->pwr[0][ridx];
 			/* Apply vendor limits. */
@@ -2940,7 +2944,7 @@ urtwn_get_txpower(struct urtwn_softc *sc, int chain,
 
 	/* Compute per-CCK rate Tx power. */
 	cckpow = rom->cck_tx_pwr[chain][group];
-	for (ridx = 0; ridx <= 3; ridx++) {
+	for (ridx = URTWN_RIDX_CCK1; ridx <= URTWN_RIDX_CCK11; ridx++) {
 		power[ridx] += cckpow;
 		if (power[ridx] > R92C_MAX_TX_PWR)
 			power[ridx] = R92C_MAX_TX_PWR;
@@ -2958,7 +2962,7 @@ urtwn_get_txpower(struct urtwn_softc *sc, int chain,
 	diff = rom->ofdm_tx_pwr_diff[group];
 	diff = (diff >> (chain * 4)) & 0xf;
 	ofdmpow = htpow + diff;	/* HT->OFDM correction. */
-	for (ridx = 4; ridx <= 11; ridx++) {
+	for (ridx = URTWN_RIDX_OFDM6; ridx <= URTWN_RIDX_OFDM54; ridx++) {
 		power[ridx] += ofdmpow;
 		if (power[ridx] > R92C_MAX_TX_PWR)
 			power[ridx] = R92C_MAX_TX_PWR;
@@ -2979,13 +2983,13 @@ urtwn_get_txpower(struct urtwn_softc *sc, int chain,
 	if (urtwn_debug >= 4) {
 		/* Dump per-rate Tx power values. */
 		printf("Tx power for chain %d:\n", chain);
-		for (ridx = 0; ridx < URTWN_RIDX_COUNT; ridx++)
+		for (ridx = URTWN_RIDX_CCK1; ridx < URTWN_RIDX_COUNT; ridx++)
 			printf("Rate %d = %u\n", ridx, power[ridx]);
 	}
 #endif
 }
 
-void
+static void
 urtwn_r88e_get_txpower(struct urtwn_softc *sc, int chain,
     struct ieee80211_channel *c, struct ieee80211_channel *extc,
     uint16_t power[URTWN_RIDX_COUNT])
@@ -3015,10 +3019,10 @@ urtwn_r88e_get_txpower(struct urtwn_softc *sc, int chain,
 
 	memset(power, 0, URTWN_RIDX_COUNT * sizeof(power[0]));
 	if (sc->regulatory == 0) {
-		for (ridx = 0; ridx <= 3; ridx++)
+		for (ridx = URTWN_RIDX_CCK1; ridx <= URTWN_RIDX_CCK11; ridx++)
 			power[ridx] = base->pwr[0][ridx];
 	}
-	for (ridx = 4; ridx < URTWN_RIDX_COUNT; ridx++) {
+	for (ridx = URTWN_RIDX_OFDM6; ridx < URTWN_RIDX_COUNT; ridx++) {
 		if (sc->regulatory == 3)
 			power[ridx] = base->pwr[0][ridx];
 		else if (sc->regulatory == 1) {
@@ -3030,7 +3034,7 @@ urtwn_r88e_get_txpower(struct urtwn_softc *sc, int chain,
 
 	/* Compute per-CCK rate Tx power. */
 	cckpow = sc->cck_tx_pwr[group];
-	for (ridx = 0; ridx <= 3; ridx++) {
+	for (ridx = URTWN_RIDX_CCK1; ridx <= URTWN_RIDX_CCK11; ridx++) {
 		power[ridx] += cckpow;
 		if (power[ridx] > R92C_MAX_TX_PWR)
 			power[ridx] = R92C_MAX_TX_PWR;
@@ -3040,7 +3044,7 @@ urtwn_r88e_get_txpower(struct urtwn_softc *sc, int chain,
 
 	/* Compute per-OFDM rate Tx power. */
 	ofdmpow = htpow + sc->ofdm_tx_pwr_diff;
-	for (ridx = 4; ridx <= 11; ridx++) {
+	for (ridx = URTWN_RIDX_OFDM6; ridx <= URTWN_RIDX_OFDM54; ridx++) {
 		power[ridx] += ofdmpow;
 		if (power[ridx] > R92C_MAX_TX_PWR)
 			power[ridx] = R92C_MAX_TX_PWR;
@@ -3054,7 +3058,7 @@ urtwn_r88e_get_txpower(struct urtwn_softc *sc, int chain,
 	}
 }
 
-void
+static void
 urtwn_set_txpower(struct urtwn_softc *sc, struct ieee80211_channel *c,
     struct ieee80211_channel *extc)
 {
@@ -3298,9 +3302,7 @@ urtwn_init(struct urtwn_softc *sc)
 	urtwn_write_region_1(sc, R92C_MACID, macaddr, IEEE80211_ADDR_LEN);
 
 	/* Set initial network type. */
-	reg = urtwn_read_4(sc, R92C_CR);
-	reg = RW(reg, R92C_CR_NETTYPE, R92C_CR_NETTYPE_INFRA);
-	urtwn_write_4(sc, R92C_CR, reg);
+	urtwn_set_mode(sc, R92C_MSR_INFRA);
 
 	urtwn_rxfilter_init(sc);
 
@@ -3461,13 +3463,11 @@ urtwn_raw_xmit(struct ieee80211_node *ni, struct mbuf *m,
 	/* prevent management frames from being sent if we're not ready */
 	if (!(sc->sc_flags & URTWN_RUNNING)) {
 		m_freem(m);
-		ieee80211_free_node(ni);
 		return (ENETDOWN);
 	}
 	URTWN_LOCK(sc);
 	bf = urtwn_getbuf(sc);
 	if (bf == NULL) {
-		ieee80211_free_node(ni);
 		m_freem(m);
 		URTWN_UNLOCK(sc);
 		return (ENOBUFS);
@@ -3475,7 +3475,6 @@ urtwn_raw_xmit(struct ieee80211_node *ni, struct mbuf *m,
 
 	if (urtwn_tx_start(sc, ni, m, bf) != 0) {
 		m_freem(m);
-		ieee80211_free_node(ni);
 		STAILQ_INSERT_HEAD(&sc->sc_tx_inactive, bf, next);
 		URTWN_UNLOCK(sc);
 		return (EIO);
